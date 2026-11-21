@@ -60,18 +60,34 @@ window.SETTINGS = {
   lampWarmth: 0.34,                // strength of the warm glow around the lantern
   rockTint: 0x4a4541,              // solid rock between tunnels is shaded much darker than the hollow tunnels
 
-  // --- Ore ---
+  // --- Deposits: four kinds, laid out from the block hash ---
+  // Only Bitcoin ore counts as sats. The minerals (amber, iron, silver) are counted by kind and add weight.
   nodesPerLevel: 4,                // laid out from the block hash; more appear while the hatch is open
-  zoneValue: [1, 3, 8, 20],        // points per node: levels 1-3, 4-6, 7-9, 10-12
+  depositMix: {                    // chance of each kind, by zone: levels 1-3, 4-6, 7-9, 10-12
+    bitcoin: [0.1, 0.22, 0.32, 0.42],   // rare on levels 1-3, richer with depth
+    amber: [0.5, 0.42, 0.33, 0.28],     // the common mineral, every level
+    iron: [0.4, 0.36, 0.25, 0.2],       // every level
+    silver: [0, 0, 0.1, 0.1],           // rare, levels 7-12 only
+  },
+  zoneValue: [1, 3, 8, 20],        // sats per Bitcoin ore node: levels 1-3, 4-6, 7-9, 10-12
   zoneWeight: [1, 1.5, 2, 2.5],    // bag weight per node, by zone
-  richChance: 0.025,               // any level: a rare rich node
+  kindWeight: { bitcoin: 1, amber: 1, iron: 2, silver: 1 },   // times the zone weight: iron weighs twice as much
+  richChance: 0.025,               // a Bitcoin ore node: a rare rich one
   richMultiplier: 5,
+  bitcoinSize: [0, 1, 2, 2],       // Bitcoin ore pile by zone: 0 small, 1 medium, 2 large (a rich one is always large)
+  mineralSizeOdds: [0.45, 0.4, 0.15],   // iron and silver piles: small, medium, large
+  pileHeight: [17, 22, 28],        // world units: piles sit on the tunnel floor against the back wall (amber stays in the wall)
+  pileSink: 2,                     // a pile is sunk this far into the floor
+  pileShade: 0.6,                  // a soft dark patch behind each pile so it stands out from the painted wall
+  bitcoinGlow: 0.5,                // Bitcoin ore's glow (the only deposit that glows)
+  bitcoinPulseSeconds: 3.5,        // one slow pulse
+  glimmer: 0.28,                   // Bitcoin ore shows as a faint glimmer through the fog; nothing else does
+  silverShimmer: 0.2,              // silver's faint cold shimmer, seen only in the lamp light
+  silverShimmerSpeed: 2.3,
   bagCapacity: 10,
   spawnEverySeconds: 20,
   spawnZoneWeights: [1, 2, 3, 4],  // new nodes favour the deep
   maxNodesPerLevel: 7,
-  glimmerFromZone: 2,              // zones from this one down (0-based: 2 = levels 7-12) glimmer in the dark
-  glimmer: 0.28,
   oreRadius: 11,                   // world units
   oreChestHeight: 30,              // ore sits in the tunnel wall this far above the floor (his chest)
   oreStandGap: 0.95,               // tiles: he stands this far beside a node, never on it
@@ -88,7 +104,8 @@ window.SETTINGS = {
 
   // --- Miner and bag ---
   minerHeight: 54,                 // world units
-  bagHeight: [12, 25],             // a quarter of his height empty, half full
+  bagHeight: [20, 34],             // with its rope handle: the sack is about a quarter of his height empty, half full
+  bagFullAt: 7,                    // bag weight: 0 flat and dark, under this half-full, from this on full
 
   // --- Camera: follows him, keeping him near the centre ---
   minerScreenShare: 0.2,           // he is about a fifth of the screen height
@@ -97,13 +114,16 @@ window.SETTINGS = {
 
   // --- Art: painted pieces cut from Assets/sheets/cutaway by tools/cut_cutaway.py. Replace any file to swap it,
   // then bump artVersion so browsers fetch the new files.
-  artVersion: 4,
+  artVersion: 5,
   art: {
     rock: ['Assets/cutaway/rock_zone1.webp', 'Assets/cutaway/rock_zone2.webp', 'Assets/cutaway/rock_zone3.webp', 'Assets/cutaway/rock_zone4.webp'],
     strip: ['Assets/cutaway/strip_zone1.webp', 'Assets/cutaway/strip_zone2.webp', 'Assets/cutaway/strip_zone3.webp', 'Assets/cutaway/strip_zone4.webp'],
     shaft: ['Assets/cutaway/tunnel_zone1.webp', 'Assets/cutaway/tunnel_zone2.webp', 'Assets/cutaway/tunnel_zone3.webp', 'Assets/cutaway/tunnel_zone4.webp'],
-    ore: ['Assets/cutaway/ore_zone1.webp', 'Assets/cutaway/ore_zone2.webp', 'Assets/cutaway/ore_zone3.webp', 'Assets/cutaway/ore_zone4.webp'],
-    oreRich: 'Assets/cutaway/ore_rich.webp',
+    ore: ['Assets/cutaway/ore_zone1.webp', 'Assets/cutaway/ore_zone2.webp', 'Assets/cutaway/ore_zone3.webp', 'Assets/cutaway/ore_zone4.webp'],   // amber
+    ore_bitcoin_: ['Assets/cutaway/ore_bitcoin_small.webp', 'Assets/cutaway/ore_bitcoin_medium.webp', 'Assets/cutaway/ore_bitcoin_large.webp'],
+    ore_iron_: ['Assets/cutaway/ore_iron_small.webp', 'Assets/cutaway/ore_iron_medium.webp', 'Assets/cutaway/ore_iron_large.webp'],
+    ore_silver_: ['Assets/cutaway/ore_silver_small.webp', 'Assets/cutaway/ore_silver_medium.webp', 'Assets/cutaway/ore_silver_large.webp'],
+    bagEmpty: 'Assets/bag_empty.webp', bagHalf: 'Assets/bag_half.webp', bagFull: 'Assets/bag_full.webp',
     ladder: 'Assets/cutaway/ladder.webp',
     surface: 'Assets/cutaway/surface.webp',
     minerWalk0: 'Assets/cutaway/miner_walk0.webp', minerWalk1: 'Assets/cutaway/miner_walk1.webp',
@@ -121,16 +141,18 @@ window.SETTINGS = {
     { size: [1024, 415], ceil: 0.177, floor: 0.883, posts: [0.274, 0.784] },
     { size: [1024, 415], ceil: 0.178, floor: 0.883, posts: [] },
   ],
-  // the miner's poses: drawn height relative to standing (scale), body centre line, and the belt lantern (the one lamp)
+  bagOverlap: 0.3,                 // share of the bag's width tucked behind his back; the rest hangs out behind him
+  // the miner's poses: drawn height relative to standing (scale), body centre line, the belt lantern (the one lamp),
+  // and his back at the shoulder blades, where the bag hangs
   pose: {
-    minerWalk0: { scale: 1.0, bodyX: 0.402, lantern: { x: 0.568, y: 0.478, h: 0.127 } },
-    minerWalk1: { scale: 0.997, bodyX: 0.527, lantern: { x: 0.783, y: 0.48, h: 0.208 } },
-    minerWalk2: { scale: 0.997, bodyX: 0.398, lantern: { x: 0.592, y: 0.479, h: 0.142 } },
-    minerWalk3: { scale: 1.0, bodyX: 0.519, lantern: { x: 0.771, y: 0.479, h: 0.213 } },
-    minerClimbA: { scale: 1.048, bodyX: 0.464, lantern: { x: 0.632, y: 0.408, h: 0.152 } },
-    minerClimbB: { scale: 1.008, bodyX: 0.449, lantern: { x: 0.625, y: 0.398, h: 0.137 } },
-    minerMine: { scale: 0.979, bodyX: 0.357, lantern: { x: 0.421, y: 0.421, h: 0.152 } },
-    minerStand: { scale: 1.0, bodyX: 0.437, lantern: { x: 0.69, y: 0.466, h: 0.173 } },
+    minerWalk0: { scale: 1.0, bodyX: 0.49, lantern: { x: 0.541, y: 0.479, h: 0.127 }, back: { x: 0.351, y: 0.3 } },
+    minerWalk1: { scale: 0.998, bodyX: 0.551, lantern: { x: 0.713, y: 0.48, h: 0.198 }, back: { x: 0.305, y: 0.3 } },
+    minerWalk2: { scale: 0.998, bodyX: 0.47, lantern: { x: 0.568, y: 0.48, h: 0.122 }, back: { x: 0.335, y: 0.3 } },
+    minerWalk3: { scale: 1.0, bodyX: 0.553, lantern: { x: 0.687, y: 0.48, h: 0.157 }, back: { x: 0.326, y: 0.3 } },
+    minerClimbA: { scale: 1.049, bodyX: 0.466, lantern: { x: 0.545, y: 0.411, h: 0.117 }, back: { x: 0.17, y: 0.3 } },
+    minerClimbB: { scale: 1.009, bodyX: 0.434, lantern: { x: 0.53, y: 0.398, h: 0.096 }, back: { x: 0.17, y: 0.3 } },
+    minerMine: { scale: 0.978, bodyX: 0.418, lantern: { x: 0.406, y: 0.422, h: 0.142 }, back: { x: 0.23, y: 0.3 } },
+    minerStand: { scale: 1.0, bodyX: 0.49, lantern: { x: 0.64, y: 0.465, h: 0.127 }, back: { x: 0.214, y: 0.3 } },
   },
   walkFrameEvery: 9,               // world units walked per walk frame
   climbFrameEvery: 10,             // world units climbed per climbing frame

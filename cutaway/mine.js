@@ -96,10 +96,24 @@
       if (n.standX < x0 || n.standX > x1 || !clearOfLadders(n.x) || !clearOfPosts(n.x) || !clearOfLadders(n.standX)) continue;
       if ((mine.terrain || []).some((t) => t.l === l && [n.x, n.standX].some((v) => v > t.x0 - T && v < t.x1 + T))) continue;
       if (here.some((m) => Math.abs(m.x - n.x) < gap * 2 || Math.abs(m.x - n.standX) < gap * 0.8 || Math.abs(m.standX - n.x) < gap * 0.8)) continue;
+      // which deposit: Bitcoin ore (sats), or a mineral (amber, iron, silver) counted by kind
+      const kinds = Object.keys(S.depositMix), total = kinds.reduce((a, k) => a + S.depositMix[k][zone], 0);
+      let pick = rng() * total, kind = kinds[kinds.length - 1];
+      for (const k of kinds) { if (pick < S.depositMix[k][zone]) { kind = k; break; } pick -= S.depositMix[k][zone]; }
+      const sizeRoll = rng();
+      const btc = kind === 'bitcoin', isRich = btc && rich;
       Object.assign(n, {
-        id: (mine.nextId = (mine.nextId || 0) + 1), l, zone, rich, crack, hp: 1, flash: 0,
-        value: S.zoneValue[zone] * (rich ? S.richMultiplier : 1), weight: S.zoneWeight[zone], r: S.oreRadius * (rich ? 1.25 : 1),
+        id: (mine.nextId = (mine.nextId || 0) + 1), l, zone, kind, rich: isRich, crack, hp: 1, flash: 0,
+        value: btc ? S.zoneValue[zone] * (isRich ? S.richMultiplier : 1) : 0,
+        weight: S.zoneWeight[zone] * S.kindWeight[kind], r: S.oreRadius * (isRich ? 1.25 : 1),
       });
+      if (kind !== 'amber') {   // a pile on the floor against the back wall, its top at about his chest; amber stays in the wall
+        let pile = 0;
+        if (btc) pile = isRich ? 2 : S.bitcoinSize[zone];
+        else { let u = sizeRoll; while (pile < 2 && u >= S.mineralSizeOdds[pile]) { u -= S.mineralSizeOdds[pile]; pile++; } }
+        n.pile = pile; n.h = S.pileHeight[pile] * (isRich ? 1.15 : 1);
+        n.base = G.floorY(l) + S.pileSink; n.y = n.base - n.h * 0.5; n.r = Math.max(S.oreRadius * 0.8, n.h * 0.5);
+      }
       nodes.push(n);
       return n;
     }

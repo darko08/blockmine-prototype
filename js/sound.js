@@ -1,6 +1,6 @@
 // Bell and knock, made with Web Audio so there are no sound files to load.
 (function () {
-  let ctx = null;
+  let ctx = null, muted = false;   // muted: every sound is skipped
   function ac() {
     if (!ctx) {
       const C = window.AudioContext || window.webkitAudioContext;
@@ -11,6 +11,7 @@
     return ctx;
   }
   function bell() {
+    if (muted) return;
     const c = ac(); if (!c) return;
     const t = c.currentTime;
     [[660, 0.35], [1320, 0.18], [1980, 0.1], [2640, 0.06], [1667, 0.08]].forEach(([f, v]) => {
@@ -34,15 +35,17 @@
     n.connect(f).connect(ng).connect(c.destination); n.start(t);
   }
   function knock() {
+    if (muted) return;
     const c = ac(); if (!c) return;
     thud(c.currentTime); thud(c.currentTime + 0.32);
   }
   function tick() {
+    if (muted) return;
     const c = ac(); if (!c) return;
     const t = c.currentTime, o = c.createOscillator(), g = c.createGain();
     o.type = 'triangle'; o.frequency.value = 1400 + Math.random() * 400;
     g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
     o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.1);
   }
-  window.Sound = { unlock: ac, bell, knock, tick };
+  window.Sound = { unlock: ac, bell, knock, tick, setMuted: (m) => { muted = !!m; }, muted: () => muted };
 })();

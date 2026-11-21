@@ -11,11 +11,35 @@
   };
   const Z = { sky: 0, rock: 1, tunnel: 2, ladder: 3, ore: 4, oreGlow: 5, crack: 6, bag: 7, miner: 8, lamp: 9, light: 10, sparks: 11, fog: 20, glimmer: 21, hatch: 3.5, label: 23, fx: 24 };
   const FONT = '"Cormorant Garamond", Georgia, serif';
-  // the phone action button's symbols (same drawings as the prompt above his head)
+  // minerals by kind, e.g. "2 amber, 1 iron"
+  const mineralText = (c) => ['amber', 'iron', 'silver'].filter((k) => c[k]).map((k) => c[k] + ' ' + k).join(', ');
+  const MUTE_KEY = 'blockmine.cutaway.muted';
+  // button symbols: the mute button's, and the phone action button's (same drawings as the prompt above his head)
   const ICON = {
+    soundOn: '<svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="#e0b878" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12H10L17 6V26L10 20H5Z" fill="#e0b878" fill-opacity=".25"/><path d="M21 11.5Q24 16 21 20.5M24.5 8Q30 16 24.5 24"/></svg>',
+    soundOff: '<svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="#e0b878" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12H10L17 6V26L10 20H5Z" fill="#e0b878" fill-opacity=".25"/><path d="M21.5 12.5L28.5 19.5M28.5 12.5L21.5 19.5"/></svg>',
     ladder: '<svg viewBox="0 0 64 64" width="34" height="34" fill="none" stroke="#e0b878" stroke-width="6" stroke-linecap="round"><path d="M18 6V58M46 6V58M18 16H46M18 28H46M18 40H46M18 52H46"/></svg>',
     pick: '<svg viewBox="0 0 64 64" width="34" height="34" fill="none" stroke="#e0b878" stroke-linecap="round"><path d="M14 54L44 18" stroke-width="6"/><path d="M18 14Q40 4 58 30" stroke-width="7"/></svg>',
   };
+  // mute: the button in the corner and the M key turn all sound off and on; the choice is remembered in this browser.
+  // Set up as soon as the page loads, before the game has started.
+  function setMute(m) {
+    Sound.setMuted(m);
+    const b = $('mute');
+    b.innerHTML = m ? ICON.soundOff : ICON.soundOn;
+    b.setAttribute('aria-label', m ? 'Sound is off. Turn it on (M)' : 'Sound is on. Turn it off (M)');
+    b.title = m ? 'Sound off (M)' : 'Sound on (M)';
+  }
+  function toggleMute() {
+    const m = !Sound.muted();
+    setMute(m);
+    try { localStorage.setItem(MUTE_KEY, m ? '1' : '0'); } catch (e) {}
+    if (!m) Sound.tick();
+  }
+  { let m = false; try { m = localStorage.getItem(MUTE_KEY) === '1'; } catch (e) {} setMute(m); }
+  $('mute').addEventListener('pointerdown', (e) => e.stopPropagation());
+  $('mute').addEventListener('click', () => { toggleMute(); $('mute').blur(); });
+  window.addEventListener('keydown', (e) => { if (e.code === 'KeyM' && !e.repeat) toggleMute(); });
 
   const records = Records(TEST, 'cutaway');
   if (TEST) $('test').style.display = 'block';
@@ -219,6 +243,7 @@
       this.promptIcon = this.add.image(0, 0, 'iconLadder').setDepth(Z.fx).setDisplaySize(12, 12);
       this.promptKey = this.add.text(0, 0, 'E', { fontFamily: FONT, fontSize: '33px', fontStyle: '600', color: '#efe8da' }).setOrigin(0.5).setScale(1 / 3).setDepth(Z.fx);   // covers his lantern once the oil is gone
       this.warm = this.add.image(0, 0, 'glow').setDepth(Z.light).setTint(0xff9a30).setBlendMode('ADD');
+      this.bagImg = this.add.image(0, 0, 'bagEmpty').setDepth(Z.bag);
       this.bagGlow = this.add.image(0, 0, 'glow').setDepth(Z.glimmer).setTint(0xffb547).setBlendMode('ADD').setAlpha(0);
     }
 
@@ -286,15 +311,26 @@
     }
 
     showNode(n) {
-      n.img = this.add.image(n.x, n.y, n.rich ? 'oreRich' : 'ore' + n.zone).setDepth(Z.ore).setRotation((n.crack - Math.PI / 2) * 0.12);   // out of the back wall
-      n.size = (n.r * 3.4) / n.img.width; n.img.setScale(n.size);
-      n.glow = this.add.image(n.x, n.y, 'glow').setDepth(Z.oreGlow).setTint(n.rich ? 0xfff0b0 : 0xff8a30).setBlendMode('ADD').setDisplaySize(n.r * 7, n.r * 7);
-      const glimmers = n.rich || n.zone >= S.glimmerFromZone;
-      n.glim = glimmers ? this.add.image(n.x, n.y, 'glow').setDepth(Z.glimmer).setTint(n.rich ? 0xfff0b0 : 0xff7a20).setBlendMode('ADD').setDisplaySize(n.r * 3.2, n.r * 3.2) : null;
+      if (n.kind === 'amber') {   // amber crystals sit in the back wall at chest height
+        n.img = this.add.image(n.x, n.y, 'ore' + n.zone).setDepth(Z.ore).setRotation((n.crack - Math.PI / 2) * 0.12);
+        n.size = (n.r * 3.4) / n.img.width;
+      } else {                    // Bitcoin ore, iron and silver: a pile on the floor against the back wall
+        n.img = this.add.image(n.x, n.base, 'ore_' + n.kind + '_' + n.pile).setOrigin(0.5, 1).setDepth(Z.ore).setFlipX(n.crack > Math.PI / 2);
+        n.size = n.h / n.img.height;
+        n.shade = this.add.image(n.x, n.base - n.h * 0.45, 'glow').setDepth(Z.ore - 0.5).setTint(0x000000).setAlpha(S.pileShade).setDisplaySize(n.h * 3, n.h * 1.9);
+      }
+      n.img.setScale(n.size);
+      n.glow = n.glim = null;
+      if (n.kind === 'bitcoin') {   // the only deposit that glows, and the only one that glimmers through the fog
+        n.glow = this.add.image(n.x, n.y, 'glow').setDepth(Z.oreGlow).setTint(n.rich ? 0xfff0b0 : 0xff8a30).setBlendMode('ADD').setDisplaySize(n.h * 3.4, n.h * 3.4);
+        n.glim = this.add.image(n.x, n.y, 'glow').setDepth(Z.glimmer).setTint(n.rich ? 0xfff0b0 : 0xff7a20).setBlendMode('ADD').setDisplaySize(n.h * 1.6, n.h * 1.6);
+      } else if (n.kind === 'silver') {   // a faint cold shimmer, only where the lamp shows it
+        n.glow = this.add.image(n.x, n.y, 'glow').setDepth(Z.oreGlow).setTint(0xcfe0ff).setBlendMode('ADD').setDisplaySize(n.h * 2.2, n.h * 2.2);
+      }
       this.nodes.push(n);
     }
     removeNode(n) {
-      n.img.destroy(); n.glow.destroy(); n.glim && n.glim.destroy();
+      n.img.destroy(); n.glow && n.glow.destroy(); n.glim && n.glim.destroy(); n.shade && n.shade.destroy();
       this.nodes = this.nodes.filter((x) => x !== n);
       this.mine.nodes = this.mine.nodes.filter((x) => x !== n);
     }
@@ -531,7 +567,10 @@
         this.sparks.explode(24, n.x, n.y);
         this.removeNode(n); this.mining = null;
         if (this.bagWeight() + n.weight > S.bagCapacity + 1e-9) this.say('No room in the bag. The ore fell.', 2.5);
-        else { this.bag.push({ value: n.value, weight: n.weight }); this.say((n.rich ? 'A rich node! ' : '') + '+' + n.value + ' ore in the bag', 2); }
+        else {
+          this.bag.push({ kind: n.kind, sats: n.value, weight: n.weight });
+          this.say(n.kind === 'bitcoin' ? (n.rich ? 'Rich Bitcoin ore! ' : '') + '+' + n.value + ' sats in the bag' : '+1 ' + n.kind + ' in the bag', 2);
+        }
       }
     }
     float(x, y, txt) {
@@ -546,13 +585,19 @@
       this.showOverlay('The deep is closed', 'The knock came before you reached the hatch. Your bag is lost. That counts as 1 death.');
     }
     bank() {
-      const pts = this.bagValue();
-      if (this.inShift) { records.get().totalPoints += pts; records.save(); }
-      this.bag = []; this.inShift = false; this.oil = S.oilStart;
-      if (pts) this.say('+' + pts + ' points banked', 3);
+      const sats = this.bagSats(), mins = this.bagMinerals(), r = records.get();
+      if (this.inShift) {
+        r.totalPoints += sats; r.minerals = r.minerals || {};
+        for (const k in mins) r.minerals[k] = (r.minerals[k] || 0) + mins[k];
+        records.save();
+      }
+      this.bag = []; this.inShift = false; this.oil = S.oilStart;   // the bag goes back to flat
+      const m = mineralText(mins);
+      if (sats || m) this.say('Banked ' + [sats ? sats + ' sats' : '', m].filter(Boolean).join(' · '), 3);
     }
     bagWeight() { return this.bag.reduce((a, b) => a + b.weight, 0); }
-    bagValue() { return this.bag.reduce((a, b) => a + b.value, 0); }
+    bagSats() { return this.bag.reduce((a, b) => a + b.sats, 0); }
+    bagMinerals() { const c = {}; for (const b of this.bag) if (b.kind !== 'bitcoin') c[b.kind] = (c[b.kind] || 0) + 1; return c; }
 
     // ---------- loop ----------
     update(time, deltaMs) {
@@ -614,11 +659,14 @@
       this.set('bLeft', this.mode === 'ladder' ? '▲' : '◀'); this.set('bRight', this.mode === 'ladder' ? '▼' : '▶');
       const L = this.lamp(); L.y -= bob;
       this.lampImg.setVisible(!lit).setPosition(L.x, L.y).setScale((L.h * 1.25) / this.lampImg.height);
-      // the bag on his back: a quarter of his height empty, half full
-      const fill = Math.min(1, this.bagWeight() / S.bagCapacity), hasOre = this.bag.length > 0;
-      const bh = S.bagHeight[0] + (S.bagHeight[1] - S.bagHeight[0]) * fill, bagKey = !hasOre ? 'bagEmpty' : fill < 0.6 ? 'bagHalf' : 'bagFull';
-      // the sack is painted on his back; its ore still glows when the lamp is out
-      const bx = this.mx - this.facing * S.minerHeight * 0.22, by = this.my - S.minerHeight * 0.8;
+      // the bag on his back: flat and dark when empty, swelling and glowing as ore goes in
+      const bw = this.bagWeight(), fill = Math.min(1, bw / S.bagCapacity), hasOre = this.bag.length > 0;
+      const bh = S.bagHeight[0] + (S.bagHeight[1] - S.bagHeight[0]) * fill, bagKey = !hasOre ? 'bagEmpty' : bw < S.bagFullAt ? 'bagHalf' : 'bagFull';
+      const mh = this.minerImg.displayHeight, mw = this.minerImg.displayWidth, f = this.facing < 0 ? -1 : 1;
+      const sx = this.mx + f * (P.back.x - P.bodyX) * mw, sy = this.my - mh * (1 - P.back.y);   // his shoulder blades
+      this.bagImg.setTexture(bagKey).setFlipX(f < 0).setOrigin(f < 0 ? S.bagOverlap : 1 - S.bagOverlap, 0.02);
+      this.bagImg.setScale(bh / this.bagImg.height).setPosition(sx, sy - 2).setRotation(this.minerImg.rotation);
+      const bx = sx - f * this.bagImg.displayWidth * 0.3, by = sy + bh * 0.62;   // the middle of the sack
       this.warm.setVisible(lit).setPosition(L.x, L.y).setDisplaySize(S.lightRadius * T * 2.2, S.lightRadius * T * 2.2).setAlpha(S.lampWarmth + 0.02 * Math.sin(this.clock * 9));
       this.hatchImg.setTexture(this.hatch === 'open' ? 'hatchOpen' : 'hatchShut');
 
@@ -627,9 +675,14 @@
       for (const n of this.nodes) {
         n.img.setScale(n.size * (0.6 + 0.4 * n.hp) * (n.flash > 0 ? 1.1 : 1));
         if (n.flash > 0) n.img.setTintFill(0xfff1c8); else n.img.clearTint();
-        const pulse = 0.85 + 0.15 * Math.sin(this.clock * 1.7 + n.id);
-        n.glow.setAlpha(0.35 * pulse * (0.5 + 0.5 * n.hp));
-        if (n.glim) n.glim.setAlpha(S.glimmer * pulse * (0.6 + 0.4 * n.hp));
+        if (n.kind === 'bitcoin') {   // a slow pulse
+          const pulse = 0.7 + 0.3 * Math.sin((this.clock / S.bitcoinPulseSeconds) * Math.PI * 2 + n.id);
+          n.glow.setAlpha(S.bitcoinGlow * pulse * (0.5 + 0.5 * n.hp));
+          n.glim.setAlpha(S.glimmer * pulse * (0.6 + 0.4 * n.hp));
+        } else if (n.kind === 'silver') {
+          const w = S.silverShimmerSpeed * this.clock + n.id;
+          n.glow.setAlpha(S.silverShimmer * (0.55 + 0.45 * Math.sin(w) * Math.sin(w * 1.73 + 1)));
+        }
         if (n !== this.mining) continue;
         const cx = Math.cos(n.crack) * n.r * 1.4, cy = Math.sin(n.crack) * n.r * 1.4;
         cg.lineStyle(3, 0x120a02, 0.9).lineBetween(n.x - cx, n.y - cy, n.x + cx, n.y + cy);
@@ -678,11 +731,12 @@
         for (const ev of ['pointerdown', 'keydown']) sl.addEventListener(ev, (e) => e.stopPropagation());
         $('speedBox').style.display = 'flex';
       }
-      $('drop').onclick = () => { const p = this.bag.pop(); if (p) { Sound.tick(); this.say('Dropped ' + p.value + ' ore', 1.5); } };
+      $('drop').onclick = () => { const p = this.bag.pop(); if (p) { Sound.tick(); this.say('Dropped ' + (p.kind === 'bitcoin' ? p.sats + ' sats' : '1 ' + p.kind), 1.5); } };
       $('recBtn').onclick = () => {
         const r = records.get();
         $('rShifts').textContent = r.shifts; $('rDeep').textContent = r.deepestLevel;
         $('rCaught').textContent = r.timesCaught; $('rPoints').textContent = r.totalPoints;
+        $('rMinerals').textContent = mineralText(r.minerals || {}) || 'none';
         $('recMode').textContent = TEST ? '(test mode)' : '(live chain)';
         $('modeBtn').textContent = TEST ? 'Back to live chain' : 'Switch to test mode';
         $('records').style.display = 'flex'; this.overlay = true;
@@ -707,7 +761,9 @@
       this.set('oil', String(Math.ceil(this.oil)));
       const w = this.bagWeight();
       this.set('bagW', (+w.toFixed(1)) + '/' + S.bagCapacity);
-      this.set('bag', this.bagValue() + ' points' + (w >= S.bagCapacity ? ' · full' : ''));
+      // two numbers: sats from Bitcoin ore, and minerals by kind
+      this.set('bagSats', String(this.bagSats()));
+      this.set('bag', (mineralText(this.bagMinerals()) || 'no minerals') + (w >= S.bagCapacity ? ' · full' : ''));
       const r = records.get(), firstShift = r.shifts < S.keysHintShifts || (r.shifts === S.keysHintShifts && this.inShift);
       $('keys').style.display = firstShift ? '' : 'none';
       const mean = TEST ? S.testBlockSeconds : S.averageBlockSeconds, secs = this.climbOutSeconds();

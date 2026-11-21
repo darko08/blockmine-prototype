@@ -58,7 +58,10 @@ def body_info(im):
     """lantern position and the body's centre line (middle of the torso columns, so the stride doesn't shift it)"""
     a = np.array(im.getchannel('A'))[int(im.height * 0.2): int(im.height * 0.6)] > 100
     w = a.sum(axis=0); cols = np.arange(len(w))
-    return {'lantern': lantern(im), 'bodyX': round(float((cols * w).sum() / w.sum()) / im.width, 3)}
+    # his back at the shoulder blades (he faces right, so the back is the leftmost painted column there): the bag hangs from it
+    sh = int(im.height * 0.30); row = np.array(im.getchannel('A'))[sh - 3: sh + 3] > 140
+    back = {'x': round(float(np.where(row.any(axis=0))[0].min()) / im.width, 3), 'y': 0.30}
+    return {'lantern': lantern(im), 'bodyX': round(float((cols * w).sum() / w.sum()) / im.width, 3), 'back': back}
 
 def miner_set(sheet, names, ref):
     """cut a row of poses; all keep one shared scale, so each is drawn at its own height relative to `ref`"""
@@ -82,6 +85,25 @@ for name, p in zip(['lamp_lit', 'lamp_out'], reading_order(pieces(Image.open(os.
 
 for name, p in zip(['ore_zone1', 'ore_zone2', 'ore_zone3', 'ore_zone4', 'ore_rich'], reading_order(pieces(Image.open(os.path.join(SRC, 'ore.png')).convert('RGBA'), 5))):
     info[name] = {'size': save(p['img'], name, 256).size}
+
+# deposits: Bitcoin ore, iron, silver. Each sheet holds a small, a medium and a large pile, left to right.
+# The faint haze around them (and loose embers) is trimmed so only the rock and its own glow remain.
+def dehaze(img, lo=56, hi=150):
+    a = np.array(img).astype(float)
+    alpha = np.clip((a[..., 3] - lo) / (hi - lo), 0, 1)
+    lab, n = ndimage.label(alpha > 0)
+    if n > 1:   # keep the pile, drop specks floating around it
+        sizes = ndimage.sum(alpha > 0, lab, range(1, n + 1))
+        alpha[~np.isin(lab, [k + 1 for k in range(n) if sizes[k] >= sizes.max() * 0.02])] = 0
+    a[..., 3] = alpha * 255
+    out = Image.fromarray(a.clip(0, 255).astype(np.uint8), 'RGBA')
+    return out.crop(out.getbbox())
+for kind in ('bitcoin', 'iron', 'silver'):
+    sheet = Image.open(os.path.join(SRC, f'ore-{kind}.png')).convert('RGBA')
+    for size, p in zip(('small', 'medium', 'large'), sorted(pieces(sheet, 3), key=lambda q: q['x'])):
+        name = f'ore_{kind}_{size}'
+        info[name] = {'size': save(dehaze(p['img']), name, 256).size}
+print('deposits', json.dumps({k: v['size'] for k, v in info.items() if k.startswith('ore_')}))
 
 for name, p in zip(['headframe_open', 'headframe_shut'], reading_order(pieces(Image.open(os.path.join(SRC, 'headframe.png')).convert('RGBA'), 2))):
     info[name] = {'size': save(p['img'], name, 640).size}
