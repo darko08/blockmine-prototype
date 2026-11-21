@@ -47,20 +47,30 @@ def lantern(im):
     """the lantern's lit glass: bright warm pixels; centre x, centre y and lantern height as fractions"""
     p = np.array(im.convert('RGBA')).astype(int); r, g, b, a = p[..., 0], p[..., 1], p[..., 2], p[..., 3]
     hot = (a > 200) & (r > 225) & (g > 150) & (b < 150)
+    hot[: int(im.height * 0.3)] = False; hot[int(im.height * 0.8):] = False   # at the belt, not the glowing sack on his back
     lab, n = ndimage.label(ndimage.binary_dilation(hot, iterations=3))
     k = np.argmax(ndimage.sum(hot, lab, range(1, n + 1))) + 1
     ys, xs = np.where((lab == k) & hot)
     return {'x': round(xs.mean() / im.width, 3), 'y': round(ys.mean() / im.height, 3), 'h': round((ys.max() - ys.min() + 1) * 2.6 / im.height, 3)}
 
 info = {}
-# miner: from the edited sheet (miner-noladder.png: the same three poses without the painted ladder and rock face)
-m = reading_order(pieces(Image.open(os.path.join(SRC, 'miner-noladder.png')).convert('RGBA'), 3, drop_edge=True))
-for name, p in zip(['miner_walk', 'miner_climb', 'miner_mine'], m):
-    im = save(p['img'], name, 512)
-    # the body's centre line (where his feet and the ladder are): middle of the opaque columns in the lower half
-    a = np.array(im.getchannel('A'))[im.height // 2:] > 100
-    cols = np.where(a.any(axis=0))[0]
-    info[name] = {'size': im.size, 'lantern': lantern(im), 'bodyX': round(float((cols.min() + cols.max()) / 2) / im.width, 3)}
+def body_info(im):
+    """lantern position and the body's centre line (middle of the torso columns, so the stride doesn't shift it)"""
+    a = np.array(im.getchannel('A'))[int(im.height * 0.2): int(im.height * 0.6)] > 100
+    w = a.sum(axis=0); cols = np.arange(len(w))
+    return {'lantern': lantern(im), 'bodyX': round(float((cols * w).sum() / w.sum()) / im.width, 3)}
+
+def miner_set(sheet, names, ref):
+    """cut a row of poses; all keep one shared scale, so each is drawn at its own height relative to `ref`"""
+    ps = reading_order(pieces(Image.open(os.path.join(SRC, sheet)).convert('RGBA'), len(names), drop_edge=True))
+    href = ps[names.index(ref)]['h'] if ref in names else max(p['h'] for p in ps)
+    for name, p in zip(names, ps):
+        im = save(p['img'], name, 512)
+        info[name] = {'size': im.size, 'scale': round(p['h'] / href, 3), 'feetY': p['y'] + p['h'], **body_info(im)}
+
+# the miner: four walk frames, and four actions (climb A, climb B, swing, stand). Both sets are scaled to his standing height.
+miner_set('miner-walk.png', ['miner_walk0', 'miner_walk1', 'miner_walk2', 'miner_walk3'], None)
+miner_set('miner-actions.png', ['miner_climbA', 'miner_climbB', 'miner_mine', 'miner_stand'], 'miner_stand')
 
 for name, p in zip(['bag_empty', 'bag_half', 'bag_full'], reading_order(pieces(Image.open(os.path.join(SRC, 'bag.png')).convert('RGBA'), 3))):
     im = save(p['img'], name, 384)
@@ -73,25 +83,15 @@ for name, p in zip(['lamp_lit', 'lamp_out'], reading_order(pieces(Image.open(os.
 for name, p in zip(['ore_zone1', 'ore_zone2', 'ore_zone3', 'ore_zone4', 'ore_rich'], reading_order(pieces(Image.open(os.path.join(SRC, 'ore.png')).convert('RGBA'), 5))):
     info[name] = {'size': save(p['img'], name, 256).size}
 
-# timber: tell the pieces apart by shape
-ts = pieces(Image.open(os.path.join(SRC, 'timber.png')).convert('RGBA'), 6)
-top = min(ts, key=lambda p: p['area']); rest = [p for p in ts if p is not top]
-tall = sorted([p for p in rest if p['h'] > 1.5 * p['w']], key=lambda p: p['x'])
-wide = sorted([p for p in rest if p['w'] > 2 * p['h']], key=lambda p: p['y'])
-brace = [p for p in rest if p not in tall and p not in wide][0]
-named = {'post': tall[0], 'ladder': tall[-1], 'beam_cap': wide[0], 'floor': wide[-1], 'brace': brace, 'ladder_top': top}
-for name, p in named.items():
-    im = p['img']
-    if name == 'ladder':   # keep the middle so it repeats rung to rung without the rail ends
-        im = im.crop((0, int(im.height * 0.06), im.width, int(im.height * 0.94)))
-    info[name] = {'size': save(im, name, 512).size}
-
 for name, p in zip(['headframe_open', 'headframe_shut'], reading_order(pieces(Image.open(os.path.join(SRC, 'headframe.png')).convert('RGBA'), 2))):
     info[name] = {'size': save(p['img'], name, 640).size}
 
-PROPS = ['prop_cart', 'prop_barrel', 'prop_crates', 'prop_pick', 'prop_shovel', 'prop_rubble', 'prop_rope', 'prop_oilcan']
-for name, p in zip(PROPS, reading_order(pieces(Image.open(os.path.join(SRC, 'props.png')).convert('RGBA'), 8))):
-    info[name] = {'size': save(p['img'], name, 320).size}
+# props: ladder section, ore cart, barrel, crate, hanging lantern
+for name, p in zip(['ladder', 'prop_cart', 'prop_barrel', 'prop_crate', 'prop_lantern'], reading_order(pieces(Image.open(os.path.join(SRC, 'props.png')).convert('RGBA'), 5))):
+    im = p['img']
+    if name == 'ladder':   # keep the middle so it repeats rung to rung
+        im = im.crop((0, int(im.height * 0.04), im.width, int(im.height * 0.96)))
+    info[name] = {'size': save(im, name, 512).size}
 
 # backdrops
 s = Image.open(os.path.join(SRC, 'surface.png')).convert('RGB'); s.thumbnail((1800, 1800), Image.LANCZOS)
@@ -101,6 +101,30 @@ for n in range(1, 5):
         t = Image.open(os.path.join(SRC, f'{kind}-{n}.png')).convert('RGB').resize((512, 512), Image.LANCZOS)
         t.save(os.path.join(OUT, f'{kind}_zone{n}.webp'), quality=80, method=6)
 
-print(json.dumps({k: v for k, v in info.items() if k.startswith(('miner', 'bag'))}, indent=1))
+# tunnel strips: the painted tunnel band, made to repeat sideways (right edge crossfades into the left), cropped to the
+# tunnel with a little rock above and below that fades out into the solid rock
+STRIP = {  # measured on the sheets: ceiling and floor lines, and the painted posts (fractions of the sheet)
+  1: {'ceil': 0.25, 'floor': 0.71, 'posts': [0.118, 0.425, 0.798]},
+  2: {'ceil': 0.26, 'floor': 0.72, 'posts': [0.113, 0.487, 0.91]},
+  3: {'ceil': 0.23, 'floor': 0.71, 'posts': [0.26, 0.745]},
+  4: {'ceil': 0.22, 'floor': 0.70, 'posts': []},
+}
+strips = {}
+for n, m in STRIP.items():
+    a = np.array(Image.open(os.path.join(SRC, f'tunnel-zone{n}.png')).convert('RGB')).astype(float)
+    H, W = a.shape[:2]; B = 96; Wl = W - B
+    body = a[:, :Wl].copy(); t = np.linspace(0, 1, B)[None, :, None]
+    body[:, :B] = a[:, Wl:] * (1 - t) + a[:, :B] * t
+    y0, y1 = int(H * (m['ceil'] - 0.12)), int(H * (m['floor'] + 0.08))
+    crop = body[y0:y1]; h = crop.shape[0]
+    alpha = np.ones(h); ft, fb = int(H * 0.10), int(H * 0.06)
+    alpha[:ft] = np.linspace(0, 1, ft); alpha[-fb:] = np.linspace(1, 0, fb)
+    rgba = np.dstack([crop, np.repeat(alpha[:, None], Wl, axis=1) * 255]).clip(0, 255).astype(np.uint8)
+    im = Image.fromarray(rgba, 'RGBA'); im = im.resize((1024, round(1024 * h / Wl)), Image.LANCZOS)
+    im.save(os.path.join(OUT, f'strip_zone{n}.webp'), quality=82, method=6)
+    strips[n] = {'size': im.size, 'ceil': round((H * m['ceil'] - y0) / h, 3), 'floor': round((H * m['floor'] - y0) / h, 3),
+                 'posts': [round(f * W / Wl, 3) for f in m['posts'] if f * W < Wl]}
+print('strips', json.dumps(strips))
+print(json.dumps({k: v for k, v in info.items() if k.startswith('miner')}, indent=1))
 total = sum(os.path.getsize(os.path.join(OUT, f)) for f in os.listdir(OUT) if f.endswith('.webp'))
 print('webp total', round(total / 1024), 'KB')

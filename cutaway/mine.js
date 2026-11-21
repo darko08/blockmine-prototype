@@ -52,6 +52,14 @@
     return mine;
   }
 
+  // where the painted strip for a zone repeats, and where its painted posts land, in world units
+  function stripRepeat(S, z) { const st = S.strip[z]; return st.size[0] * (S.tunnelHeight * S.tile) / ((st.floor - st.ceil) * st.size[1]); }
+  function postsIn(S, z, xa, xb) {
+    const R = stripRepeat(S, z), out = [];
+    for (let k = Math.floor(xa / R) - 1; k <= Math.ceil(xb / R); k++) for (const f of S.strip[z].posts) { const x = (k + f) * R; if (x >= xa - S.tile && x <= xb + S.tile) out.push(x); }
+    return out;
+  }
+
   // walkable x range of a level (surface included)
   function span(mine, l) {
     const T = mine.S.tile, seg = l < 0 ? mine.surface : mine.levels[l];
@@ -63,22 +71,30 @@
     const S = mine.S, G = mine.G, T = S.tile, seg = mine.levels[l], zone = G.zone(l);
     const nodes = mine.nodes || (mine.nodes = []);
     const here = nodes.filter((n) => n.l === l);
-    const inLadders = mine.ladders.filter((d) => d.bottom === l).map((d) => d.c);   // these come down through the ceiling
-    for (let tries = 0; tries < 16; tries++) {
+    // ore sits in the tunnel's back wall at chest height; he stands beside it, never on it. Keep clear of ladders,
+    // of the painted timber posts, and of other nodes and their standing spots.
+    const ladderXs = mine.ladders.filter((d) => d.bottom === l || d.top === l).map((d) => G.colX(d.c));
+    const postXs = postsIn(S, zone, seg.a * T, (seg.b + 1) * T);
+    const [x0, x1] = span(mine, l), y = G.floorY(l) - S.oreChestHeight, gap = S.oreStandGap * T;
+    const clearOfLadders = (x) => ladderXs.every((v) => Math.abs(v - x) > T * 1.1);
+    const clearOfPosts = (x) => postXs.every((v) => Math.abs(v - x) > S.orePostClear * T);
+    for (let tries = 0; tries < S.orePlaceTries; tries++) {
       const onEnd = rng() < 0.3, rich = rng() < S.richChance, crack = rng() * Math.PI, jitter = rng() - 0.5;
       let n;
-      if (onEnd) {
+      if (onEnd) {   // near an end wall; he stands on the inward side
         const side = rng() < 0.5 ? -1 : 1;
         if (here.some((m) => m.kind === 'end' && m.side === side)) continue;
-        const x = side < 0 ? seg.a * T : (seg.b + 1) * T;
-        n = { kind: 'end', side, col: side < 0 ? seg.a : seg.b, x, y: G.floorY(l) - S.tunnelHeight * T * (0.45 + jitter * 0.3), standX: x - side * T * 0.45 };
-      } else {
-        const col = randInt(rng, seg.a, seg.b);
-        if (inLadders.some((c) => Math.abs(c - col) <= 1)) continue;
-        if (here.some((m) => m.kind === 'ceil' && Math.abs(m.col - col) <= 1)) continue;
-        const x = G.colX(col) + jitter * T * 0.5;
-        n = { kind: 'ceil', side: 0, col, x, y: G.ceilY(l) + 4, standX: Math.min(span(mine, l)[1], Math.max(span(mine, l)[0], x)) };
+        const x = side < 0 ? seg.a * T + T * 0.55 : (seg.b + 1) * T - T * 0.55;
+        n = { kind: 'end', side, col: side < 0 ? seg.a : seg.b, x, y: y + jitter * 6, standX: x - side * gap };
+      } else {       // along the wall; he stands on the side toward the middle of the tunnel
+        const col = randInt(rng, seg.a, seg.b), x = G.colX(col) + jitter * T * 0.5;
+        const dir = x < (x0 + x1) / 2 ? 1 : -1;
+        let standX = x + dir * gap;
+        if (standX < x0 || standX > x1) standX = x - dir * gap;
+        n = { kind: 'wall', side: 0, col, x, y: y + jitter * 6, standX };
       }
+      if (n.standX < x0 || n.standX > x1 || !clearOfLadders(n.x) || !clearOfPosts(n.x) || !clearOfLadders(n.standX)) continue;
+      if (here.some((m) => Math.abs(m.x - n.x) < gap * 2 || Math.abs(m.x - n.standX) < gap * 0.8 || Math.abs(m.standX - n.x) < gap * 0.8)) continue;
       Object.assign(n, {
         id: (mine.nextId = (mine.nextId || 0) + 1), l, zone, rich, crack, hp: 1, flash: 0,
         value: S.zoneValue[zone] * (rich ? S.richMultiplier : 1), weight: S.zoneWeight[zone], r: S.oreRadius * (rich ? 1.25 : 1),
@@ -153,5 +169,5 @@
     return { loc: best, dist: bd };
   }
 
-  root.MineGen = { geometry, generate, layoutNodes, makeNode, route, nearest, point, span };
+  root.MineGen = { geometry, generate, layoutNodes, makeNode, route, nearest, point, span, stripRepeat, postsIn };
 })(typeof window !== 'undefined' ? window : globalThis);

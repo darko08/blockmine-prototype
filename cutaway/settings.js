@@ -38,7 +38,7 @@ window.SETTINGS = {
   fogVisitedLampOut: 0.95,
   fogCell: 16,
   lampWarmth: 0.34,                // strength of the warm glow around the lantern
-  rockTint: 0x6b6560,              // solid rock is shaded darker than the tunnels cut into it
+  rockTint: 0x4a4541,              // solid rock between tunnels is shaded much darker than the hollow tunnels
 
   // --- Ore ---
   nodesPerLevel: 4,                // laid out from the block hash; more appear while the hatch is open
@@ -53,6 +53,10 @@ window.SETTINGS = {
   glimmerFromZone: 2,              // zones from this one down (0-based: 2 = levels 7-12) glimmer in the dark
   glimmer: 0.28,
   oreRadius: 11,                   // world units
+  oreChestHeight: 30,              // ore sits in the tunnel wall this far above the floor (his chest)
+  oreStandGap: 0.95,               // tiles: he stands this far beside a node, never on it
+  orePostClear: 0.55,              // tiles: ore keeps this far from the painted timber posts
+  orePlaceTries: 40,               // attempts to find a free spot for each node
 
   // --- Swinging (same rule as the rope version) ---
   swingMinLength: 35,
@@ -66,49 +70,58 @@ window.SETTINGS = {
   minerHeight: 54,                 // world units
   bagHeight: [12, 25],             // a quarter of his height empty, half full
 
-  // --- Camera ---
-  viewHeight: 460,                 // world units visible top to bottom (about 4 levels)
-  viewWidthMin: 330,               // at least this much across, on narrow phones
+  // --- Camera: follows him, keeping him near the centre ---
+  minerScreenShare: 0.2,           // he is about a fifth of the screen height
+  viewWidthMin: 160,               // but at least this many world units across (5 tiles), so a tall phone still shows the tunnel
+  cameraFollow: 10,                // how quickly the camera catches up (higher = tighter)
 
   // --- Art: painted pieces cut from Assets/sheets/cutaway by tools/cut_cutaway.py. Replace any file to swap it,
   // then bump artVersion so browsers fetch the new files.
-  artVersion: 3,
+  artVersion: 4,
   art: {
     rock: ['Assets/cutaway/rock_zone1.webp', 'Assets/cutaway/rock_zone2.webp', 'Assets/cutaway/rock_zone3.webp', 'Assets/cutaway/rock_zone4.webp'],
-    tunnel: ['Assets/cutaway/tunnel_zone1.webp', 'Assets/cutaway/tunnel_zone2.webp', 'Assets/cutaway/tunnel_zone3.webp', 'Assets/cutaway/tunnel_zone4.webp'],
+    strip: ['Assets/cutaway/strip_zone1.webp', 'Assets/cutaway/strip_zone2.webp', 'Assets/cutaway/strip_zone3.webp', 'Assets/cutaway/strip_zone4.webp'],
+    shaft: ['Assets/cutaway/tunnel_zone1.webp', 'Assets/cutaway/tunnel_zone2.webp', 'Assets/cutaway/tunnel_zone3.webp', 'Assets/cutaway/tunnel_zone4.webp'],
     ore: ['Assets/cutaway/ore_zone1.webp', 'Assets/cutaway/ore_zone2.webp', 'Assets/cutaway/ore_zone3.webp', 'Assets/cutaway/ore_zone4.webp'],
     oreRich: 'Assets/cutaway/ore_rich.webp',
     ladder: 'Assets/cutaway/ladder.webp',
-    post: 'Assets/cutaway/post.webp', beamCap: 'Assets/cutaway/beam_cap.webp', brace: 'Assets/cutaway/brace.webp', floor: 'Assets/cutaway/floor.webp',
     surface: 'Assets/cutaway/surface.webp',
-    minerWalk: 'Assets/cutaway/miner_walk.webp', minerClimb: 'Assets/cutaway/miner_climb.webp', minerMine: 'Assets/cutaway/miner_mine.webp',
-    bagEmpty: 'Assets/cutaway/bag_empty.webp', bagHalf: 'Assets/cutaway/bag_half.webp', bagFull: 'Assets/cutaway/bag_full.webp',
-    lampLit: 'Assets/cutaway/lamp_lit.webp', lampOut: 'Assets/cutaway/lamp_out.webp',
+    minerWalk0: 'Assets/cutaway/miner_walk0.webp', minerWalk1: 'Assets/cutaway/miner_walk1.webp',
+    minerWalk2: 'Assets/cutaway/miner_walk2.webp', minerWalk3: 'Assets/cutaway/miner_walk3.webp',
+    minerClimbA: 'Assets/cutaway/miner_climbA.webp', minerClimbB: 'Assets/cutaway/miner_climbB.webp',
+    minerMine: 'Assets/cutaway/miner_mine.webp', minerStand: 'Assets/cutaway/miner_stand.webp',
+    lampOut: 'Assets/cutaway/lamp_out.webp',
     hatchOpen: 'Assets/cutaway/headframe_open.webp', hatchShut: 'Assets/cutaway/headframe_shut.webp',
-    props: ['Assets/cutaway/prop_cart.webp', 'Assets/cutaway/prop_barrel.webp', 'Assets/cutaway/prop_crates.webp', 'Assets/cutaway/prop_pick.webp',
-      'Assets/cutaway/prop_shovel.webp', 'Assets/cutaway/prop_rubble.webp', 'Assets/cutaway/prop_rope.webp', 'Assets/cutaway/prop_oilcan.webp'],
+    props: ['Assets/cutaway/prop_cart.webp', 'Assets/cutaway/prop_barrel.webp', 'Assets/cutaway/prop_crate.webp', 'Assets/cutaway/prop_lantern.webp'],
   },
-  // measured by tools/cut_cutaway.py, as fractions of each picture: the lantern he carries (the one lamp) and his body's centre line
+  // measured by tools/cut_cutaway.py. The tunnel strips: ceiling and floor lines, painted posts (fractions), picture size.
+  strip: [
+    { size: [1024, 403], ceil: 0.182, floor: 0.879, posts: [0.124, 0.447, 0.84] },
+    { size: [1024, 403], ceil: 0.182, floor: 0.879, posts: [0.119, 0.513, 0.958] },
+    { size: [1024, 415], ceil: 0.177, floor: 0.883, posts: [0.274, 0.784] },
+    { size: [1024, 415], ceil: 0.178, floor: 0.883, posts: [] },
+  ],
+  // the miner's poses: drawn height relative to standing (scale), body centre line, and the belt lantern (the one lamp)
   pose: {
-    minerWalk: { lantern: { x: 0.931, y: 0.37, h: 0.142 }, bodyX: 0.461 },
-    minerClimb: { lantern: { x: 0.334, y: 0.519, h: 0.122 }, bodyX: 0.426 },
-    minerMine: { lantern: { x: 0.389, y: 0.597, h: 0.102 }, bodyX: 0.424 },
+    minerWalk0: { scale: 1.0, bodyX: 0.402, lantern: { x: 0.568, y: 0.478, h: 0.127 } },
+    minerWalk1: { scale: 0.997, bodyX: 0.527, lantern: { x: 0.783, y: 0.48, h: 0.208 } },
+    minerWalk2: { scale: 0.997, bodyX: 0.398, lantern: { x: 0.592, y: 0.479, h: 0.142 } },
+    minerWalk3: { scale: 1.0, bodyX: 0.519, lantern: { x: 0.771, y: 0.479, h: 0.213 } },
+    minerClimbA: { scale: 1.048, bodyX: 0.464, lantern: { x: 0.632, y: 0.408, h: 0.152 } },
+    minerClimbB: { scale: 1.008, bodyX: 0.449, lantern: { x: 0.625, y: 0.398, h: 0.137 } },
+    minerMine: { scale: 0.979, bodyX: 0.357, lantern: { x: 0.421, y: 0.421, h: 0.152 } },
+    minerStand: { scale: 1.0, bodyX: 0.437, lantern: { x: 0.69, y: 0.466, h: 0.173 } },
   },
-  bagStrapX: { bagEmpty: 0.327, bagHalf: 0.362, bagFull: 0.377 },
-  backX: 0.2,                      // the bag's strap sits this far behind his centre line (fraction of his picture's width)
-  backY: 0.22,                     // and this far down from the top of his head (fraction of his height)
+  walkFrameEvery: 9,               // world units walked per walk frame
+  climbFrameEvery: 10,             // world units climbed per climbing frame
 
-  // --- Timbering and props (world units) ---
-  postEvery: 4,                    // tiles between support posts
-  postWidth: 9,
-  beamHeight: 10,
-  floorHeight: 11,
-  braceSize: 30,
+  // --- Ladders, headframe, surface, props (world units) ---
   ladderWidth: 26,
   hatchWidth: 112,
   surfaceWidth: 2600,
   surfaceGround: 0.83,             // where the ground line sits in the surface painting, as a fraction of its height
+  soilEdge: 64,                    // height of the soil-and-rock edge under the ground line
   propsPerLevel: [0, 2],           // min, max, laid out from the block hash
-  propHeight: [26, 24, 30, 26, 28, 14, 12, 16],   // cart, barrel, crates, pick, shovel, rubble, rope, oil can
+  propHeight: [28, 22, 20, 24],    // cart, barrel, crate, hanging lantern
   waitOffset: 2.6,                 // tiles left of the shaft where he waits on the surface
 };

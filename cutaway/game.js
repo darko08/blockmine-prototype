@@ -34,7 +34,7 @@
       this.input.mouse && this.input.mouse.disableContextMenu();
 
       this.mine = null; this.nodes = []; this.mineObjs = [];
-      this.loc = null; this.mx = 0; this.my = 0; this.steps = []; this.ctx = null; this.facing = 1; this.walkT = 0;
+      this.loc = null; this.mx = 0; this.my = 0; this.steps = []; this.ctx = null; this.facing = 1; this.walkT = 0; this.walkDist = 0; this.climbDist = 0;
       this.pending = null; this.mining = null; this.drag = null;
       this.bag = []; this.oil = S.oilStart; this.inShift = false;
       this.hatch = 'waiting'; this.paused = false; this.overlay = false;
@@ -62,6 +62,34 @@
         g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.35, 'rgba(255,255,255,0.45)'); g.addColorStop(1, 'rgba(255,255,255,0)');
         c.fillStyle = g; c.fillRect(0, 0, n, n);
       });
+      canvas('fadeX', 64, (c, n) => {   // black on the left fading to clear on the right
+        const g = c.createLinearGradient(0, 0, n, 0);
+        g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = g; c.fillRect(0, 0, n, n);
+      });
+      // the soil-and-rock edge under the ground line: the upper rock painting with a ragged top, darkening downward
+      if (!this.textures.exists('soilEdge')) {
+        const src = this.textures.get('rock0').getSourceImage(), W = 512, H = 128;
+        const t = this.textures.createCanvas('soilEdge', W, H), c = t.getContext(), rng = seededRandom('soil');
+        c.drawImage(src, 0, 0, src.width, src.height * H / W, 0, 0, W, H);
+        const g = c.createLinearGradient(0, 0, 0, H);
+        g.addColorStop(0, 'rgba(40,28,16,0.15)'); g.addColorStop(0.55, 'rgba(10,8,6,0.45)'); g.addColorStop(1, 'rgba(0,0,0,0.62)');
+        c.fillStyle = g; c.fillRect(0, 0, W, H);
+        c.globalCompositeOperation = 'destination-in';
+        c.beginPath(); c.moveTo(0, H);
+        let y = 14;
+        for (let x = 0; x <= W; x += 8) { y = Math.max(4, Math.min(30, y + (rng() - 0.5) * 10)); c.lineTo(x, (x === W ? 14 : y)); }
+        c.lineTo(W, H); c.closePath(); c.fillStyle = '#000'; c.fill();
+        // and loose stones sitting on the edge
+        c.globalCompositeOperation = 'source-over';
+        for (let i = 0; i < 22; i++) {
+          const x = rng() * W, r = 3 + rng() * 7, yy = 18 + rng() * 22;
+          const v = rng() * 30; c.fillStyle = `rgba(${Math.round(58 + v)},${Math.round(48 + v * 0.85)},${Math.round(38 + v * 0.7)},1)`;
+          c.beginPath(); c.ellipse(x, yy, r * 1.3, r, rng() * 3, 0, Math.PI * 2); c.fill();
+          c.fillStyle = 'rgba(0,0,0,0.35)'; c.beginPath(); c.ellipse(x + 1, yy + r * 0.5, r * 1.1, r * 0.5, 0, 0, Math.PI * 2); c.fill();
+        }
+        t.refresh();
+      }
       canvas('dot', 16, (c, n) => {
         const g = c.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
         g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)');
@@ -74,7 +102,7 @@
       this.mineObjs.forEach((o) => o.destroy()); this.mineObjs = [];
       const keep = (o) => { this.mineObjs.push(o); return o; };
       const m = this.mine, G = m.G, W = S.cols * T, side = 30 * T, last = S.levels - 1;
-      const k = 0.5;   // world units per texture pixel for the rock and tunnel paintings
+      const k = 0.5;   // world units per texture pixel for the rock paintings
       const tile = (x, y, w, h, key, depth) => {
         const t = keep(this.add.tileSprite(x, y, w, h, key).setOrigin(0, 0).setDepth(depth).setTileScale(k));
         t.tilePositionX = x / k; t.tilePositionY = y / k;
@@ -85,61 +113,50 @@
       keep(this.add.graphics().setDepth(Z.sky)).fillStyle(0x07080b, 1).fillRect(-side, -3000, W + 2 * side, 3000);
       const sky = img(W / 2, 0, 'surface', Z.sky + 0.1).setOrigin(0.5, S.surfaceGround);
       sky.setScale(S.surfaceWidth / sky.width);
-      // four bands of rock, one per zone
+      // four bands of solid rock, one per zone, much darker than the hollow tunnels
       for (let z = 0; z < 4; z++) {
         const y0 = z === 0 ? 0 : G.floorY(z * S.zoneLevels - 1), y1 = z === 3 ? G.floorY(last) + 30 * T : G.floorY(z * S.zoneLevels + S.zoneLevels - 1);
-        tile(-side, y0, W + 2 * side, y1 - y0, 'rock' + z, Z.rock).setTint(S.rockTint);   // solid rock darker than the open tunnels
+        tile(-side, y0, W + 2 * side, y1 - y0, 'rock' + z, Z.rock).setTint(S.rockTint);
       }
-      // the tunnels: back wall, a cap beam along the ceiling, a plank floor, posts with corner braces
-      const rnd = seededRandom(m.hash + '|props');
-      m.levels.forEach((seg, l) => {
-        const z = G.zone(l), x = seg.a * T, w = (seg.b - seg.a + 1) * T, fy = G.floorY(l), cy = G.ceilY(l);
-        tile(x, cy, w, S.tunnelHeight * T, 'tunnel' + z, Z.tunnel);
-        const beam = keep(this.add.tileSprite(x, cy - 2, w, S.beamHeight, 'beamCap').setOrigin(0, 0).setDepth(Z.tunnel + 0.4));
-        beam.setTileScale(S.beamHeight / this.textures.get('beamCap').getSourceImage().height);
-        const floor = keep(this.add.tileSprite(x, fy - 4, w, S.floorHeight, 'floor').setOrigin(0, 0).setDepth(Z.tunnel + 0.6));
-        floor.setTileScale(S.floorHeight / this.textures.get('floor').getSourceImage().height);
-        const ladderCols = m.ladders.filter((d) => d.top === l || d.bottom === l).map((d) => G.colX(d.c));
-        const clear = (px, gap) => ladderCols.every((lx) => Math.abs(lx - px) > gap);
-        const posts = [];
-        for (let px = x + S.postWidth / 2; px <= x + w - S.postWidth / 2 + 0.1; px += S.postEvery * T) posts.push(px);
-        if (posts[posts.length - 1] < x + w - S.postWidth) posts.push(x + w - S.postWidth / 2);
-        posts.forEach((px, n) => {
-          if (!clear(px, T * 0.7)) return;
-          const post = img(px, fy, 'post', Z.tunnel + 0.5).setOrigin(0.5, 1);
-          post.setDisplaySize(S.postWidth, fy - cy);
-          // corner braces, pointing into the tunnel
-          for (const dir of [-1, 1]) {
-            if ((dir < 0 && n === 0) || (dir > 0 && n === posts.length - 1) || !clear(px + dir * S.braceSize * 0.6, T * 0.6)) continue;
-            if ((n + (dir > 0 ? 0 : 1)) % 2) continue;
-            const b = img(px, cy + S.beamHeight - 3, 'brace', Z.tunnel + 0.45).setOrigin(0, 0).setFlipX(dir < 0);
-            if (dir < 0) b.setOrigin(1, 0);
-            b.setDisplaySize(S.braceSize, S.braceSize * b.height / b.width);
-          }
-        });
-        // a few things lying about, placed by the block hash
-        const nProps = S.propsPerLevel[0] + Math.floor(rnd() * (S.propsPerLevel[1] - S.propsPerLevel[0] + 1));
-        for (let i = 0; i < nProps; i++) {
-          const kind = Math.floor(rnd() * S.art.props.length), px = x + T + rnd() * (w - 2 * T);
-          if (!clear(px, T * 1.2)) continue;
-          const pr = img(px, fy - 2, 'props' + kind, Z.tunnel + 0.55).setOrigin(0.5, 1).setFlipX(rnd() < 0.5);
-          pr.setScale(S.propHeight[kind] / pr.height);
-        }
-      });
-      // ladders, each in its own hole through the rock
+      // a soil-and-rock edge instead of a hard line under the ground
+      const soil = keep(this.add.tileSprite(-side, -S.soilEdge * 0.3, W + 2 * side, S.soilEdge, 'soilEdge').setOrigin(0, 0).setDepth(Z.rock + 0.5));
+      soil.setTileScale(S.soilEdge / 128);
+      // ladders, each in its own dark hole through the rock
       m.ladders.forEach((d) => {
         const lx = G.colX(d.c), y0 = G.floorY(d.top), y1 = G.floorY(d.bottom), up = d.top < 0 ? 0 : T * 0.6;
-        tile(d.c * T, y0, T, G.ceilY(d.bottom) - y0, 'tunnel' + G.zone(Math.max(0, d.top)), Z.tunnel);
+        tile(d.c * T + 3, y0, T - 6, G.ceilY(d.bottom) - y0 + 4, 'shaft' + G.zone(Math.max(0, d.top)), Z.tunnel - 0.1).setTint(0x8a8178);
         const lad = keep(this.add.tileSprite(lx, y0 - up, S.ladderWidth, y1 - y0 + up, 'ladder').setOrigin(0.5, 0).setDepth(Z.ladder));
         lad.setTileScale(S.ladderWidth / this.textures.get('ladder').getSourceImage().width);
       });
-      // level numbers down the left edge
-      for (let l = 0; l < S.levels; l++) {
-        keep(this.add.text(-10, G.floorY(l) - 6, String(l + 1), { fontFamily: FONT, fontSize: '26px', fontStyle: '500', color: '#ffd28a', stroke: '#000', strokeThickness: 4 })
-          .setOrigin(1, 1).setDepth(Z.label).setAlpha(0.85));
-      }
-      ['I', 'II', 'III', 'IV'].forEach((name, z) => keep(this.add.text(W + 10, G.floorY(z * S.zoneLevels) - S.tunnelHeight * T - 4, 'zone ' + name,
-        { fontFamily: FONT, fontSize: '18px', color: '#b08d57', stroke: '#000', strokeThickness: 3 }).setOrigin(0, 1).setDepth(Z.label).setAlpha(0.8)));
+      // the tunnels: this zone's painted tunnel strip, repeating sideways, lined up in world space so its posts are where the
+      // ore placement expects them; the ends fade into the rock
+      const rnd = seededRandom(m.hash + '|props');
+      m.levels.forEach((seg, l) => {
+        const z = G.zone(l), x = seg.a * T, w = (seg.b - seg.a + 1) * T, fy = G.floorY(l), cy = G.ceilY(l), st = S.strip[z];
+        const ks = MineGen.stripRepeat(S, z) / st.size[0], h = st.size[1] * ks, top = cy - st.ceil * h, pad = T * 0.5;
+        const strip = keep(this.add.tileSprite(x - pad, top, w + 2 * pad, h, 'strip' + z).setOrigin(0, 0).setDepth(Z.tunnel).setTileScale(ks));
+        strip.tilePositionX = (x - pad) / ks; strip.tilePositionY = 0;
+        for (const end of [-1, 1]) {
+          const f = img(end < 0 ? x - pad : x + w + pad, top, 'fadeX', Z.tunnel + 0.2).setOrigin(end < 0 ? 0 : 1, 0).setDisplaySize(pad * 2.2, h);
+          if (end > 0) f.setFlipX(true);
+        }
+        // a few things lying about, placed by the block hash
+        const ladderXs = m.ladders.filter((d) => d.top === l || d.bottom === l).map((d) => G.colX(d.c));
+        const nodesHere = m.nodes.filter((n) => n.l === l);
+        const clear = (px) => ladderXs.every((v) => Math.abs(v - px) > T * 1.2) && nodesHere.every((n) => Math.abs(n.x - px) > T && Math.abs(n.standX - px) > T * 0.8);
+        const nProps = S.propsPerLevel[0] + Math.floor(rnd() * (S.propsPerLevel[1] - S.propsPerLevel[0] + 1));
+        for (let i = 0; i < nProps; i++) {
+          const kind = Math.floor(rnd() * S.art.props.length), px = x + T + rnd() * (w - 2 * T), flip = rnd() < 0.5;
+          if (!clear(px)) continue;
+          const hanging = kind === 3;   // the lantern hangs from the cap beam
+          const pr = img(px, hanging ? cy + 2 : fy + 2, 'props' + kind, Z.tunnel + 0.55).setOrigin(0.5, hanging ? 0 : 1).setFlipX(flip);
+          pr.setScale(S.propHeight[kind] / pr.height);
+          if (hanging) img(px, cy + 2 + S.propHeight[kind] * 0.75, 'glow', Z.tunnel + 0.56).setTint(0xffa040).setBlendMode('ADD').setAlpha(0.55).setDisplaySize(T * 2.2, T * 2.2);
+        }
+        // the level number at the start of each level
+        keep(this.add.text(x + 4, cy - 3, 'LEVEL ' + (l + 1), { fontFamily: FONT, fontSize: '33px', fontStyle: '500', color: '#ffd28a', stroke: '#000', strokeThickness: 6 })
+          .setOrigin(0, 1).setScale(1 / 3).setDepth(Z.label).setAlpha(0.95));
+      });
       // the headframe over the shaft; its hatch is open or shut
       this.hatchImg = keep(this.add.image(G.colX(m.c0), 4, this.hatch === 'open' ? 'hatchOpen' : 'hatchShut').setOrigin(0.5, 1).setDepth(Z.hatch));
       this.hatchImg.setScale(S.hatchWidth / this.hatchImg.width);
@@ -155,8 +172,7 @@
     }
 
     buildMiner() {
-      this.bagImg = this.add.image(0, 0, 'bagEmpty').setOrigin(0.5, 0).setDepth(Z.bag);
-      this.minerImg = this.add.image(0, 0, 'minerWalk').setOrigin(0.5, 1).setDepth(Z.miner);
+      this.minerImg = this.add.image(0, 0, 'minerStand').setOrigin(0.5, 1).setDepth(Z.miner);
       this.lampImg = this.add.image(0, 0, 'lampOut').setDepth(Z.lamp).setVisible(false);   // covers his lantern once the oil is gone
       this.warm = this.add.image(0, 0, 'glow').setDepth(Z.light).setTint(0xff9a30).setBlendMode('ADD');
       this.bagGlow = this.add.image(0, 0, 'glow').setDepth(Z.glimmer).setTint(0xffb547).setBlendMode('ADD').setAlpha(0);
@@ -180,7 +196,7 @@
     fitCamera() {
       const cam = this.cameras.main, W = this.scale.width, H = this.scale.height;
       cam.setSize(W, H);
-      cam.setZoom(Math.min(H / S.viewHeight, W / S.viewWidthMin));
+      cam.setZoom(Math.min((H * S.minerScreenShare) / S.minerHeight, W / S.viewWidthMin));
     }
 
     // ---------- the chain ----------
@@ -225,8 +241,7 @@
     }
 
     showNode(n) {
-      n.img = this.add.image(n.x, n.y, n.rich ? 'oreRich' : 'ore' + n.zone).setDepth(Z.ore)
-        .setRotation(n.kind === 'ceil' ? Math.PI : -n.side * Math.PI / 2);   // grows out of the ceiling or the end wall
+      n.img = this.add.image(n.x, n.y, n.rich ? 'oreRich' : 'ore' + n.zone).setDepth(Z.ore).setRotation((n.crack - Math.PI / 2) * 0.12);   // out of the back wall
       n.size = (n.r * 3.4) / n.img.width; n.img.setScale(n.size);
       n.glow = this.add.image(n.x, n.y, 'glow').setDepth(Z.oreGlow).setTint(n.rich ? 0xfff0b0 : 0xff8a30).setBlendMode('ADD').setDisplaySize(n.r * 7, n.r * 7);
       const glimmers = n.rich || n.zone >= S.glimmerFromZone;
@@ -272,13 +287,16 @@
     hatchLoc() { return { kind: 'level', l: -1, x: this.mine.G.colX(this.mine.c0) }; }
     poseKey() {
       const climbing = (this.ctx && this.ctx.kind === 'ladder') || (!this.steps.length && this.loc && this.loc.kind === 'ladder');
-      return this.mining ? 'minerMine' : climbing ? 'minerClimb' : 'minerWalk';
+      if (this.mining) return 'minerMine';
+      if (climbing) return Math.floor(this.climbDist / S.climbFrameEvery) % 2 ? 'minerClimbB' : 'minerClimbA';
+      if (this.steps.length) return 'minerWalk' + (Math.floor(this.walkDist / S.walkFrameEvery) % 4);
+      return 'minerStand';
     }
     // the lantern painted in his hand or on his belt is the one lamp: the light comes from there
     lamp() {
       const key = this.poseKey(), P = S.pose[key], tex = this.textures.get(key).getSourceImage();
-      const w = S.minerHeight * tex.width / tex.height;
-      return { x: this.mx + (P.lantern.x - P.bodyX) * w * this.facing, y: this.my - (1 - P.lantern.y) * S.minerHeight, h: P.lantern.h * S.minerHeight };
+      const H = S.minerHeight * P.scale, w = H * tex.width / tex.height;
+      return { x: this.mx + (P.lantern.x - P.bodyX) * w * this.facing, y: this.my - (1 - P.lantern.y) * H, h: Math.min(0.18, P.lantern.h) * H };
     }
     lampOn() { return this.oil > 0; }
     lit(n) { const L = this.lamp(); return this.lampOn() && Math.hypot(n.x - L.x, n.y - L.y) <= S.lightRadius * T; }
@@ -351,7 +369,7 @@
       n.hp -= 1 / swingsNeeded; n.flash = 0.12;
       Sound.tick();
       this.sparks.explode(t >= 1 ? 16 : 7, n.x, n.y);
-      this.float(n.x, n.y + (n.kind === 'ceil' ? n.r + 12 : -n.r - 8), t >= 1 ? 'clean' : t > 0.5 ? 'rough' : 'sloppy');
+      this.float(n.x, n.y - n.r - 10, t >= 1 ? 'clean' : t > 0.5 ? 'rough' : 'sloppy');
       if (n.hp <= 1e-9) {
         this.sparks.explode(24, n.x, n.y);
         this.removeNode(n); this.mining = null;
@@ -400,11 +418,8 @@
       }
       for (const n of this.nodes) n.flash = Math.max(0, n.flash - dt);
       if (this.mine) {
-        const cam = this.cameras.main, vw = cam.width / cam.zoom, vh = cam.height / cam.zoom;
-        const W = S.cols * T, minX = -3 * T + vw / 2, maxX = W + 3 * T - vw / 2;
-        const cx = minX > maxX ? W / 2 : clamp(this.mx, minX, maxX);
-        const cy = clamp(this.my - S.minerHeight * 0.5, -vh * 0.32, this.mine.G.floorY(S.levels - 1) + 2 * T - vh / 2);
-        const ox = cam.midPoint.x, oy = cam.midPoint.y, k = Math.min(1, dt * 6);
+        const cam = this.cameras.main, cx = this.mx, cy = this.my - S.minerHeight * 0.5;
+        const ox = cam.midPoint.x, oy = cam.midPoint.y, k = Math.min(1, dt * S.cameraFollow);
         cam.centerOn(this.camInit ? ox + (cx - ox) * k : cx, this.camInit ? oy + (cy - oy) * k : cy); this.camInit = true;
         this.draw();
       }
@@ -418,6 +433,8 @@
         this.ctx = s.ctx;
         const sp = this.speeds(), v = s.ctx.kind === 'level' ? sp.walk : dy < 0 ? sp.up : sp.down;
         if (dx) this.facing = dx < 0 ? -1 : 1;
+        const moved = Math.min(dist, v * left);
+        if (s.ctx.kind === 'level') this.walkDist += moved; else this.climbDist += moved;
         if (dist <= v * left) { this.mx = s.x; this.my = s.y; left -= dist / v; this.loc = s.loc; this.steps.shift(); }
         else { this.mx += (dx / dist) * v * left; this.my += (dy / dist) * v * left; left = 0; }
         this.walkT += dt;
@@ -433,17 +450,16 @@
     draw() {
       const lit = this.lampOn(), moving = this.steps.length > 0, onLadder = this.ctx && this.ctx.kind === 'ladder';
       const key = this.poseKey(), climbing = key === 'minerClimb', P = S.pose[key];
-      const bob = moving && !climbing ? Math.abs(Math.sin(this.walkT * 9)) * 1.5 : 0;
-      this.minerImg.setTexture(key).setScale(S.minerHeight / this.minerImg.height).setFlipX(this.facing < 0)
+      const bob = 0;   // the walk frames carry the motion
+      this.minerImg.setTexture(key).setScale((S.minerHeight * P.scale) / this.minerImg.height).setFlipX(this.facing < 0)
         .setOrigin(this.facing < 0 ? 1 - P.bodyX : P.bodyX, 1).setPosition(this.mx, this.my - bob);
       const L = this.lamp(); L.y -= bob;
       this.lampImg.setVisible(!lit).setPosition(L.x, L.y).setScale((L.h * 1.25) / this.lampImg.height);
       // the bag on his back: a quarter of his height empty, half full
       const fill = Math.min(1, this.bagWeight() / S.bagCapacity), hasOre = this.bag.length > 0;
       const bh = S.bagHeight[0] + (S.bagHeight[1] - S.bagHeight[0]) * fill, bagKey = !hasOre ? 'bagEmpty' : fill < 0.6 ? 'bagHalf' : 'bagFull';
-      const bx = this.mx - this.facing * S.backX * this.minerImg.displayWidth, by = this.my - S.minerHeight * (1 - S.backY) - bob;
-      this.bagImg.setTexture(bagKey).setFlipX(this.facing < 0).setOrigin(this.facing < 0 ? 1 - S.bagStrapX[bagKey] : S.bagStrapX[bagKey], 0).setPosition(bx, by);
-      this.bagImg.setScale(bh / this.bagImg.height).setRotation(Math.sin(this.clock * 2) * 0.04 * (1 - fill));
+      // the sack is painted on his back; its ore still glows when the lamp is out
+      const bx = this.mx - this.facing * S.minerHeight * 0.22, by = this.my - S.minerHeight * 0.8;
       this.warm.setVisible(lit).setPosition(L.x, L.y).setDisplaySize(S.lightRadius * T * 2.2, S.lightRadius * T * 2.2).setAlpha(S.lampWarmth + 0.02 * Math.sin(this.clock * 9));
       this.hatchImg.setTexture(this.hatch === 'open' ? 'hatchOpen' : 'hatchShut');
 
@@ -463,7 +479,7 @@
       }
       this.drawFog(L, lit);
       // with the lamp out, the bag's ore still glows
-      this.bagGlow.setPosition(bx, by + bh * 0.6).setDisplaySize(Math.max(1, bh * 2.4), Math.max(1, bh * 2.4))
+      this.bagGlow.setPosition(bx, by).setDisplaySize(Math.max(1, bh * 2.4), Math.max(1, bh * 2.4))
         .setAlpha(hasOre ? (lit ? 0.1 : 0.45) * (0.5 + fill) : 0);
     }
 
