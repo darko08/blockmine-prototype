@@ -35,7 +35,7 @@
 
       this.mine = null; this.nodes = []; this.mineObjs = [];
       this.mode = 'ground'; this.lvl = -1; this.ladderK = null; this.mx = 0; this.my = 0; this.vx = 0; this.vy = 0; this.falling = null;
-      this.stun = 0; this.pitReturn = null; this.facing = 1; this.walkDist = 0; this.climbDist = 0; this.moving = false;
+      this.stun = 0; this.pitReturn = null; this.facing = 1; this.speed = 1; this.walkDist = 0; this.climbDist = 0; this.moving = false;
       this.keys = { left: false, right: false, up: false, down: false }; this.pad = { left: false, right: false }; this.press = { jump: false, action: false };
       this.mining = null; this.drag = null;
       this.bag = []; this.oil = S.oilStart; this.inShift = false;
@@ -246,7 +246,7 @@
       if (this.below()) this.caught();
       this.hatch = 'shut'; this.mining = null;
       if (this.hatchImg) this.hatchImg.setTexture('hatchShut');
-      this.shutTimer = setTimeout(() => this.openMine(b, true), S.hatchShutSeconds * 1000);
+      this.shutTimer = setTimeout(() => this.openMine(b, true), (S.hatchShutSeconds * 1000) / this.speed);
     }
 
     openMine(b, ring) {
@@ -543,31 +543,36 @@
 
     // ---------- loop ----------
     update(time, deltaMs) {
-      const dt = Math.min(deltaMs, 100) / 1000;
+      const real = Math.min(deltaMs, 100) / 1000, dt = real * this.speed;   // test mode can run the whole game faster or slower
       this.clock += dt;
       if (this.mine && !this.paused && !this.overlay) {
-        this.spawn(dt);
-        const wasBelow = this.below();
-        this.physics(dt);
-        const below = this.below();
-        if (below && !wasBelow && !this.inShift) { this.inShift = true; records.get().shifts++; records.save(); }
-        if (!below && wasBelow) this.bank();
-        const h = this.here();
-        if (this.mode === 'ground' && h.l >= 0 && h.l + 1 > records.get().deepestLevel) { records.get().deepestLevel = h.l + 1; records.save(); }
-        if (below && this.oil > 0) {
-          this.oil = Math.max(0, this.oil - S.oilBurnPerSecond * dt);
-          if (this.oil === 0) this.lampDied();
-        }
-        if (this.mining && (!this.lampOn() || !this.nodes.includes(this.mining))) this.mining = null;
+        // small steps, so a fast game still can't skip over a hole or a gap
+        for (let left = dt; left > 1e-6;) { const h = Math.min(left, S.maxStep); left -= h; this.step(h); }
       }
       for (const n of this.nodes) n.flash = Math.max(0, n.flash - dt);
       if (this.mine) {
         const cam = this.cameras.main, cx = this.mx, cy = this.my - S.minerHeight * 0.5;
-        const ox = cam.midPoint.x, oy = cam.midPoint.y, k = Math.min(1, dt * S.cameraFollow);
+        const ox = cam.midPoint.x, oy = cam.midPoint.y, k = Math.min(1, real * S.cameraFollow);
         cam.centerOn(this.camInit ? ox + (cx - ox) * k : cx, this.camInit ? oy + (cy - oy) * k : cy); this.camInit = true;
         this.draw();
       }
       this.hud();
+    }
+
+    step(dt) {
+      this.spawn(dt);
+      const wasBelow = this.below();
+      this.physics(dt);
+      const below = this.below();
+      if (below && !wasBelow && !this.inShift) { this.inShift = true; records.get().shifts++; records.save(); }
+      if (!below && wasBelow) this.bank();
+      const h = this.here();
+      if (this.mode === 'ground' && h.l >= 0 && h.l + 1 > records.get().deepestLevel) { records.get().deepestLevel = h.l + 1; records.save(); }
+      if (below && this.oil > 0) {
+        this.oil = Math.max(0, this.oil - S.oilBurnPerSecond * dt);
+        if (this.oil === 0) this.lampDied();
+      }
+      if (this.mining && (!this.lampOn() || !this.nodes.includes(this.mining))) this.mining = null;
     }
 
     lampDied() {
@@ -639,6 +644,17 @@
       const stop = (e) => e.stopPropagation();
       ['drop', 'recBtn', 'ovBtn', 'recClose', 'modeBtn'].forEach((id) => { $(id).addEventListener('pointerdown', stop); });
       this.bindKeys();
+      // test mode: the whole game speed
+      if (TEST) {
+        const sl = $('speed'), show = () => { this.speed = TestClock.speed = S.testSpeeds[+sl.value]; $('speedVal').textContent = this.speed + '×'; };
+        sl.max = S.testSpeeds.length - 1;
+        let saved = S.testSpeeds.indexOf(1); try { const v = +localStorage.getItem('blockmine.cutaway.testSpeed'); if (v >= 0 && v < S.testSpeeds.length && localStorage.getItem('blockmine.cutaway.testSpeed') !== null) saved = v; } catch (e) {}
+        sl.value = saved; show();
+        sl.addEventListener('input', () => { show(); try { localStorage.setItem('blockmine.cutaway.testSpeed', sl.value); } catch (e) {} });
+        sl.addEventListener('change', () => sl.blur());
+        for (const ev of ['pointerdown', 'keydown']) sl.addEventListener(ev, (e) => e.stopPropagation());
+        $('speedBox').style.display = 'flex';
+      }
       $('drop').onclick = () => { const p = this.bag.pop(); if (p) { Sound.tick(); this.say('Dropped ' + p.value + ' ore', 1.5); } };
       $('recBtn').onclick = () => {
         const r = records.get();
@@ -678,7 +694,7 @@
       this.set('msg', performance.now() < this.msgUntil ? this.msg : '');
       const bi = this.blockInfo;
       this.set('blockNum', bi ? bi.height.toLocaleString() : '–');
-      this.set('blockOpen', bi ? mmss(Date.now() - bi.arrivedAt) : '–:––');
+      this.set('blockOpen', bi ? mmss((TEST ? TestClock.now() : Date.now()) - bi.arrivedAt) : '–:––');
       this.set('prevOpen', bi && bi.prevOpenMs != null ? 'previous block open ' + mmss(bi.prevOpenMs) : 'previous block open —');
     }
   }

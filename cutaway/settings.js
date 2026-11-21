@@ -3,7 +3,9 @@
 window.SETTINGS = {
   // --- Chain timer (same as the rope version) ---
   averageBlockSeconds: 600,        // Bitcoin's 10-minute average, used for the honest number
-  testBlockSeconds: 60,            // test mode: simulated blocks, exponential, this mean
+  testBlockSeconds: 60,
+  testSpeeds: [0.25, 0.5, 1, 2, 4, 8],   // test mode: the whole-game speed slider's steps
+  maxStep: 1 / 60,                 // the game moves in steps no longer than this (seconds of game time)            // test mode: simulated blocks, exponential, this mean
   hatchShutSeconds: 3,             // after the knock, the hatch stays shut this long before the new mine opens
   feedStaleSeconds: 45,
   feedReconnectSeconds: 5,

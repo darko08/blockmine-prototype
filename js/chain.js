@@ -69,18 +69,24 @@
     connect();
   }
 
+  // test mode keeps its own clock, which runs at the game speed chosen on the slider (window.TestClock.speed)
+  const TestClock = window.TestClock = { t: Date.now(), speed: 1, now() { return this.t; } };
+
   function TestChain(onBlock, onStatus) {
-    let height = 900000, last = Date.now();
+    let height = 900000, last = TestClock.now(), due = 0, real = performance.now();
     onStatus('live');
     function next() {
       // same randomness as the real chain: arrivals are exponential (memoryless), here with a 1-minute mean
-      const wait = -Math.log(1 - Math.random()) * S.testBlockSeconds * 1000;
-      setTimeout(() => {
-        const now = Date.now(), prevOpenMs = now - last; last = now;
+      due = TestClock.now() - Math.log(1 - Math.random()) * S.testBlockSeconds * 1000;
+    }
+    setInterval(() => {
+      const n = performance.now(); TestClock.t += (n - real) * TestClock.speed; real = n;
+      if (TestClock.now() >= due) {
+        const now = TestClock.now(), prevOpenMs = now - last; last = now;
         onBlock({ hash: randomHash(), height: ++height, initial: false, missed: false, arrivedAt: now, prevOpenMs });
         next();
-      }, wait);
-    }
+      }
+    }, 50);
     onBlock({ hash: randomHash(), height, initial: true, missed: false, arrivedAt: last, prevOpenMs: null });
     next();
   }

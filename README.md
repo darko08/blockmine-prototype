@@ -16,6 +16,7 @@ A single-player practice mine timed by the real Bitcoin chain. One web page, Pha
 - The percentage is the chance a block lands before you'd reach the hatch if you left now and made no mistakes, from the time of a clean run back along the real route: `1 - e^(-seconds / 600)`.
 - A clean round trip to level 12 (down empty, back with a full bag) takes about 5 minutes 40 seconds on an average mine (`node tools/tune_cutaway.js` measures it).
 - Block clock, live-feed handling and records work as in the rope version; the cutaway keeps its own record.
+- Test mode has a **Game speed** slider (0.25× to 8×) that speeds up everything: moving, oil, new nodes, stuns, the simulated blocks and the block clock.
 
 ## Rope version (`/rope/`)
 - Hold on empty rock to go down; let go to climb. Press a node within lamp reach to stop there, then drag along its crack to swing.
