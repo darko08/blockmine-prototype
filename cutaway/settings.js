@@ -22,12 +22,32 @@ window.SETTINGS = {
   secondLadderChance: 0.45,        // chance a pair of levels gets a second ladder
   surfaceWidth: 4,                 // tiles of ground either side of the hatch
 
-  // --- Moving (world units per second; a full bag halves all of them). Tuned with tools/tune_cutaway.js so a
-  // round trip to level 12 (down empty, back up with a full bag) takes about 8 minutes.
-  walkSpeed: 27,
-  ladderUpSpeed: 15.5,
-  ladderDownSpeed: 21,
-  fullBagSpeedFactor: 0.5,         // scales linearly with bag weight
+  // --- Moving: direct control (world units per second; a full bag halves all of them) ---
+  runSpeed: 54,                    // empty: twice the old walking speed
+  climbSpeed: 15.5,                // up a ladder
+  slideSpeed: 46.5,                // down a ladder: three times climbing speed
+  fullBagSpeedFactor: 0.5,         // a full bag moves at half the empty speed (scales linearly with weight)
+  jumpHeight: 16,                  // world units
+  gravity: 420,
+  jumpDistance: 72,                // how far an empty jump carries (world units)
+  fullBagJumpFactor: 0.6,          // a full bag clears about 60% of an empty jump (scales linearly with weight)
+  grabRange: 0.6,                  // tiles: E grabs a ladder going up this close to it
+  grabRangeDown: 0.95,             // tiles: and one going down from beside its hole
+  holeHalf: 0.42,                  // tiles: half the width of the open hole where a ladder goes down
+  mineRange: 0.7,                  // tiles past his standing spot that E still reaches a node
+  fallStunSeconds: 3,              // falling one level (or into a gap): stunned this long
+  fallSpill: 0.25,                 // and this share of the bag spills (rounded to whole pieces). Falls never kill.
+  pitDepth: 0.9,                   // tiles: how deep a gap's pit is
+
+  // --- Gaps and rubble, laid out from the block hash ---
+  terrainPerZone: [[0, 0], [0, 1], [1, 2], [2, 3]],   // min, max per level: none on levels 1-3, more with depth
+  gapShare: 0.5,                   // share of them that are gaps (the rest are rubble mounds)
+  gapWidth: [18, 40],              // world units (capped so a full bag can always clear it)
+  rubbleWidth: [16, 34],
+  rubbleHeight: 9,
+  gapSafety: 0.8,                  // the widest gap is this share of a full-bag jump
+  rubbleSafety: 0.5,               // the widest mound is this share of a full-bag jump (he must stay above it)
+  keysHintShifts: 1,               // show the controls on screen for this many shifts
 
   // --- Lamp and oil ---
   oilStart: 100,

@@ -3,15 +3,16 @@
 globalThis.window = globalThis;
 require('../js/rng.js'); require('../cutaway/settings.js'); require('../cutaway/mine.js');
 const S = window.SETTINGS;
-const down = { walk: S.walkSpeed, up: S.ladderUpSpeed, down: S.ladderDownSpeed };
-const f = S.fullBagSpeedFactor, up = { walk: S.walkSpeed * f, up: S.ladderUpSpeed * f, down: S.ladderDownSpeed * f };
-const trips = [], downs = [], ups = [];
+const down = { walk: S.runSpeed, up: S.climbSpeed, down: S.slideSpeed };
+const f = S.fullBagSpeedFactor, up = { walk: S.runSpeed * f, up: S.climbSpeed * f, down: S.slideSpeed * f };
+const trips = [], downs = [], ups = [], terrain = {};
 let same = true;
 for (let i = 0; i < 400; i++) {
   const hash = randomHash();
-  const m = MineGen.generate(hash, S); MineGen.layoutNodes(m);
-  const m2 = MineGen.generate(hash, S); MineGen.layoutNodes(m2);
-  if (JSON.stringify([m.levels, m.ladders, m.nodes]) !== JSON.stringify([m2.levels, m2.ladders, m2.nodes])) same = false;
+  const m = MineGen.generate(hash, S); MineGen.layoutNodes(m); MineGen.layoutTerrain(m);
+  const m2 = MineGen.generate(hash, S); MineGen.layoutNodes(m2); MineGen.layoutTerrain(m2);
+  if (JSON.stringify([m.levels, m.ladders, m.nodes, m.terrain]) !== JSON.stringify([m2.levels, m2.ladders, m2.nodes, m2.terrain])) same = false;
+  for (const t of m.terrain) { if (t.l < 3) throw new Error('terrain on levels 1-3'); const w = t.x1 - t.x0, L = MineGen.jumpLimits(S); if (w > (t.kind === 'gap' ? L.gap : L.rubble) + 1e-9) throw new Error('too wide'); terrain[t.l] = (terrain[t.l] || 0) + 1; }
   const hatch = { kind: 'level', l: -1, x: m.G.colX(m.c0) };
   // every level reachable from the hatch
   for (let l = 0; l < S.levels; l++) {
@@ -29,4 +30,5 @@ const mmss = (s) => Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padSta
 console.log('same block gives same mine:', same, '| all levels reachable: true');
 console.log('down empty  avg', mmss(avg(downs)), '| up full avg', mmss(avg(ups)));
 console.log('round trip  avg', mmss(avg(trips)), ' 10%', mmss(pct(trips, 0.1)), ' 90%', mmss(pct(trips, 0.9)));
+console.log('gaps and rubble per level (total over 400 mines):', JSON.stringify(terrain));
 console.log('chance a block lands during the climb from level 12 (avg):', ((1 - Math.exp(-avg(ups) / S.averageBlockSeconds)) * 100).toFixed(0) + '%');

@@ -94,6 +94,7 @@
         n = { kind: 'wall', side: 0, col, x, y: y + jitter * 6, standX };
       }
       if (n.standX < x0 || n.standX > x1 || !clearOfLadders(n.x) || !clearOfPosts(n.x) || !clearOfLadders(n.standX)) continue;
+      if ((mine.terrain || []).some((t) => t.l === l && [n.x, n.standX].some((v) => v > t.x0 - T && v < t.x1 + T))) continue;
       if (here.some((m) => Math.abs(m.x - n.x) < gap * 2 || Math.abs(m.x - n.standX) < gap * 0.8 || Math.abs(m.standX - n.x) < gap * 0.8)) continue;
       Object.assign(n, {
         id: (mine.nextId = (mine.nextId || 0) + 1), l, zone, rich, crack, hp: 1, flash: 0,
@@ -108,6 +109,37 @@
     mine.nodes = [];
     for (let l = 0; l < mine.S.levels; l++) for (let i = 0; i < mine.S.nodesPerLevel; i++) makeNode(mine, mine.nodeRng, l);
     return mine.nodes;
+  }
+
+  // ---------- gaps and rubble that need a jump ----------
+  // none on levels 1-3, more with depth. Each is narrower than a jump with a full bag, so none is ever impossible.
+  function jumpLimits(S) {
+    const full = S.jumpDistance * S.fullBagJumpFactor;
+    return { gap: Math.min(S.gapWidth[1], full * S.gapSafety), rubble: Math.min(S.rubbleWidth[1], full * S.rubbleSafety) };
+  }
+  function layoutTerrain(mine) {
+    const S = mine.S, G = mine.G, T = S.tile, rng = seededRandom(mine.hash + '|terrain'), lim = jumpLimits(S), out = [];
+    mine.terrain = out;
+    mine.levels.forEach((seg, l) => {
+      const [lo, hi] = S.terrainPerZone[G.zone(l)], count = lo + Math.floor(rng() * (hi - lo + 1));
+      const [x0, x1] = span(mine, l);
+      const ladderXs = mine.ladders.filter((d) => d.top === l || d.bottom === l).map((d) => G.colX(d.c));
+      const nodes = (mine.nodes || []).filter((n) => n.l === l);
+      for (let i = 0; i < count; i++) {
+        for (let tries = 0; tries < 30; tries++) {
+          const gap = rng() < S.gapShare, wr = gap ? [S.gapWidth[0], lim.gap] : [S.rubbleWidth[0], lim.rubble];
+          const w = wr[0] + rng() * (wr[1] - wr[0]), cx = x0 + 1.5 * T + rng() * (x1 - x0 - 3 * T), a = cx - w / 2, b = cx + w / 2;
+          const hgt = gap ? 0 : S.rubbleHeight * (0.8 + 0.2 * rng());
+          if (x1 - x0 < 4 * T) break;
+          if (ladderXs.some((v) => v > a - 1.5 * T && v < b + 1.5 * T)) continue;
+          if (nodes.some((n) => [n.x, n.standX].some((v) => v > a - 1.2 * T && v < b + 1.2 * T))) continue;
+          if (out.some((t) => t.l === l && t.x1 > a - 2.5 * T && t.x0 < b + 2.5 * T)) continue;
+          out.push({ l, kind: gap ? 'gap' : 'rubble', x0: a, x1: b, h: hgt });
+          break;
+        }
+      }
+    });
+    return out;
   }
 
   // ---------- routes ----------
@@ -169,5 +201,5 @@
     return { loc: best, dist: bd };
   }
 
-  root.MineGen = { geometry, generate, layoutNodes, makeNode, route, nearest, point, span, stripRepeat, postsIn };
+  root.MineGen = { geometry, generate, layoutNodes, layoutTerrain, jumpLimits, makeNode, route, nearest, point, span, stripRepeat, postsIn };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -34,8 +34,10 @@
       this.input.mouse && this.input.mouse.disableContextMenu();
 
       this.mine = null; this.nodes = []; this.mineObjs = [];
-      this.loc = null; this.mx = 0; this.my = 0; this.steps = []; this.ctx = null; this.facing = 1; this.walkT = 0; this.walkDist = 0; this.climbDist = 0;
-      this.pending = null; this.mining = null; this.drag = null;
+      this.mode = 'ground'; this.lvl = -1; this.ladderK = null; this.mx = 0; this.my = 0; this.vx = 0; this.vy = 0; this.falling = null;
+      this.stun = 0; this.pitReturn = null; this.facing = 1; this.walkDist = 0; this.climbDist = 0; this.moving = false;
+      this.keys = { left: false, right: false, up: false, down: false }; this.pad = { left: false, right: false }; this.press = { jump: false, action: false };
+      this.mining = null; this.drag = null;
       this.bag = []; this.oil = S.oilStart; this.inShift = false;
       this.hatch = 'waiting'; this.paused = false; this.overlay = false;
       this.shutTimer = null; this.msgUntil = 0; this.clock = 0; this.blockInfo = null; this.risk = 0;
@@ -90,6 +92,16 @@
         }
         t.refresh();
       }
+      canvas('rubble', 128, (c, n) => {   // a mound of loose rock, sitting on the bottom edge
+        const rng = seededRandom('rubble');
+        for (let i = 0; i < 60; i++) {
+          const t = i / 60, x = n * (0.1 + 0.8 * rng()), top = n - (n * 0.55) * Math.sin(Math.PI * (x / n)) * (0.6 + 0.4 * rng());
+          const y = top + (n - top) * rng() * 0.7, r = 4 + rng() * 9 * (1 - t * 0.4), v = rng() * 35;
+          c.fillStyle = `rgb(${Math.round(52 + v)},${Math.round(44 + v * 0.85)},${Math.round(36 + v * 0.7)})`;
+          c.beginPath(); c.ellipse(x, Math.min(n - r * 0.6, y), r * 1.3, r, rng() * 3, 0, Math.PI * 2); c.fill();
+          c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); c.ellipse(x + 1, Math.min(n - r * 0.3, y + r * 0.5), r, r * 0.45, 0, 0, Math.PI * 2); c.fill();
+        }
+      });
       canvas('dot', 16, (c, n) => {
         const g = c.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
         g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)');
@@ -152,6 +164,16 @@
           const pr = img(px, hanging ? cy + 2 : fy + 2, 'props' + kind, Z.tunnel + 0.55).setOrigin(0.5, hanging ? 0 : 1).setFlipX(flip);
           pr.setScale(S.propHeight[kind] / pr.height);
           if (hanging) img(px, cy + 2 + S.propHeight[kind] * 0.75, 'glow', Z.tunnel + 0.56).setTint(0xffa040).setBlendMode('ADD').setAlpha(0.55).setDisplaySize(T * 2.2, T * 2.2);
+        }
+        // gaps (a pit in the floor) and rubble mounds; both need a jump
+        for (const t of m.terrain.filter((q) => q.l === l)) {
+          if (t.kind === 'gap') {
+            const g = keep(this.add.graphics().setDepth(Z.tunnel + 0.6)), d = S.pitDepth * T;
+            g.fillStyle(0x020101, 1).fillRect(t.x0, fy - 4, t.x1 - t.x0, d + 4);
+            g.fillStyle(0x2a1d12, 1).fillRect(t.x0 - 2, fy - 4, 3, d).fillRect(t.x1 - 1, fy - 4, 3, d);
+          } else {
+            img((t.x0 + t.x1) / 2, fy + 3, 'rubble', Z.tunnel + 0.6).setOrigin(0.5, 1).setDisplaySize((t.x1 - t.x0) * 1.4, t.h * 2.1);
+          }
         }
         // the level number at the start of each level
         keep(this.add.text(x + 4, cy - 3, 'LEVEL ' + (l + 1), { fontFamily: FONT, fontSize: '33px', fontStyle: '500', color: '#ffd28a', stroke: '#000', strokeThickness: 6 })
@@ -222,7 +244,7 @@
       const v = this.cameras.main.worldView;
       for (let i = 0; i < 80; i++) this.dust.explode(1, v.x + Math.random() * v.width, v.y + Math.random() * v.height * 0.6);
       if (this.below()) this.caught();
-      this.hatch = 'shut'; this.mining = null; this.pending = null;
+      this.hatch = 'shut'; this.mining = null;
       if (this.hatchImg) this.hatchImg.setTexture('hatchShut');
       this.shutTimer = setTimeout(() => this.openMine(b, true), S.hatchShutSeconds * 1000);
     }
@@ -231,11 +253,12 @@
       this.clearNodes();
       this.mine = MineGen.generate(b.hash, S);
       MineGen.layoutNodes(this.mine);
+      MineGen.layoutTerrain(this.mine);
       this.mine.spawnRng = seededRandom(b.hash + '|spawn'); this.mine.spawnT = 0;
       this.hatch = 'open';
       this.buildMine();
       this.mine.nodes.forEach((n) => this.showNode(n));
-      if (!this.loc || !this.below()) this.toSurface();
+      if (!this.below()) this.toSurface();
       if (ring) Sound.bell();
       this.say('Block ' + b.height.toLocaleString() + ' · the hatch is open', 4);
     }
@@ -273,71 +296,200 @@
     // ---------- where the miner is ----------
     toSurface() {
       const m = this.mine;
-      this.loc = { kind: 'level', l: -1, x: m.G.colX(m.c0) - S.waitOffset * T };
-      const p = MineGen.point(m, this.loc); this.mx = p.x; this.my = p.y;
-      this.steps = []; this.ctx = null; this.mining = null; this.pending = null;
+      this.mode = 'ground'; this.lvl = -1; this.ladderK = null; this.falling = null; this.stun = 0; this.pitReturn = null;
+      this.mx = m.G.colX(m.c0) - S.waitOffset * T; this.my = 0; this.vx = this.vy = 0; this.mining = null;
     }
     below() { return this.my > 1; }
-    here() {   // the miner's place, even half-way along a step
-      if (!this.ctx) return this.loc;
-      return this.ctx.kind === 'level' ? { kind: 'level', l: this.ctx.l, x: this.mx } : { kind: 'ladder', k: this.ctx.k, y: this.my };
+    floorY(l) { return this.mine.G.floorY(l); }
+    here() {   // for the honest number: where he is on the walking routes
+      if (this.mode === 'ladder') return { kind: 'ladder', k: this.ladderK, y: this.my };
+      const l = this.falling ? this.falling.toLvl : this.lvl, [x0, x1] = MineGen.span(this.mine, l);
+      return { kind: 'level', l, x: clamp(this.mx, x0, x1) };
     }
-    factor() { return 1 - (1 - S.fullBagSpeedFactor) * Math.min(1, this.bagWeight() / S.bagCapacity); }
-    speeds() { const f = this.factor(); return { walk: S.walkSpeed * f, up: S.ladderUpSpeed * f, down: S.ladderDownSpeed * f }; }
+    fill() { return Math.min(1, this.bagWeight() / S.bagCapacity); }
+    factor() { return 1 - (1 - S.fullBagSpeedFactor) * this.fill(); }
+    speeds() { const f = this.factor(); return { walk: S.runSpeed * f, up: S.climbSpeed * f, down: S.slideSpeed * f }; }
     hatchLoc() { return { kind: 'level', l: -1, x: this.mine.G.colX(this.mine.c0) }; }
     poseKey() {
-      const climbing = (this.ctx && this.ctx.kind === 'ladder') || (!this.steps.length && this.loc && this.loc.kind === 'ladder');
       if (this.mining) return 'minerMine';
-      if (climbing) return Math.floor(this.climbDist / S.climbFrameEvery) % 2 ? 'minerClimbB' : 'minerClimbA';
-      if (this.steps.length) return 'minerWalk' + (Math.floor(this.walkDist / S.walkFrameEvery) % 4);
+      if (this.mode === 'ladder') return Math.floor(this.climbDist / S.climbFrameEvery) % 2 ? 'minerClimbB' : 'minerClimbA';
+      if (this.mode === 'air' && !this.falling) return 'minerWalk1';
+      if (this.moving) return 'minerWalk' + (Math.floor(this.walkDist / S.walkFrameEvery) % 4);
       return 'minerStand';
     }
-    // the lantern painted in his hand or on his belt is the one lamp: the light comes from there
+    // the lantern on his belt is the one lamp: the light comes from there
     lamp() {
       const key = this.poseKey(), P = S.pose[key], tex = this.textures.get(key).getSourceImage();
       const H = S.minerHeight * P.scale, w = H * tex.width / tex.height;
       return { x: this.mx + (P.lantern.x - P.bodyX) * w * this.facing, y: this.my - (1 - P.lantern.y) * H, h: Math.min(0.18, P.lantern.h) * H };
     }
     lampOn() { return this.oil > 0; }
-    lit(n) { const L = this.lamp(); return this.lampOn() && Math.hypot(n.x - L.x, n.y - L.y) <= S.lightRadius * T; }
 
-    goTo(loc) {
-      if (!this.mine || !loc) return;
-      const goesBelow = (loc.kind === 'ladder') || loc.l >= 0;
-      if (goesBelow && !this.below() && this.hatch !== 'open') { this.say('The hatch is shut.', 2); return; }
-      const r = MineGen.route(this.mine, this.here(), loc, this.speeds());
-      if (!r) return;
-      this.steps = r.steps.slice();
-      if (!this.ctx && this.steps.length) this.ctx = this.steps[0].ctx;
+    // ---------- direct control ----------
+    bindKeys() {
+      const map = { KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down' };
+      window.addEventListener('keydown', (e) => {
+        if (map[e.code]) { this.keys[map[e.code]] = true; e.preventDefault(); }
+        if (e.code === 'Space') { if (!e.repeat) this.press.jump = true; e.preventDefault(); }
+        if (e.code === 'KeyE' && !e.repeat) this.press.action = true;
+        Sound.unlock();
+      });
+      window.addEventListener('keyup', (e) => { if (map[e.code]) this.keys[map[e.code]] = false; });
+      window.addEventListener('blur', () => { for (const k in this.keys) this.keys[k] = false; });
+      // phone: left, right, jump and action buttons. On a ladder, left and right become up and down.
+      const hold = (id, on, off) => {
+        const b = $(id);
+        b.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); Sound.unlock(); on(); });
+        for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, off);
+      };
+      hold('bLeft', () => { this.pad.left = true; }, () => { this.pad.left = false; });
+      hold('bRight', () => { this.pad.right = true; }, () => { this.pad.right = false; });
+      hold('bJump', () => { this.press.jump = true; }, () => {});
+      hold('bAct', () => { this.press.action = true; }, () => {});
+    }
+    holeAt(l, x) {   // the open hole where a ladder goes down from this level (the shaft only while the hatch is open)
+      const m = this.mine;
+      for (let k = 0; k < m.ladders.length; k++) {
+        const d = m.ladders[k];
+        if (d.top === l && Math.abs(m.G.colX(d.c) - x) < S.holeHalf * T && (l >= 0 || this.hatch === 'open')) return k;
+      }
+      return -1;
+    }
+    terrainAt(l, x, kind) { return this.mine.terrain.find((t) => t.l === l && t.kind === kind && x > t.x0 && x < t.x1); }
+    blockRubble(l, x0, x1, feetY) {   // stop at a rubble mound unless his feet are above it
+      for (const t of this.mine.terrain) {
+        if (t.l !== l || t.kind !== 'rubble' || feetY <= this.floorY(l) - t.h) continue;
+        if (x0 <= t.x0 && x1 > t.x0) return t.x0 - 0.01;
+        if (x0 >= t.x1 && x1 < t.x1) return t.x1 + 0.01;
+      }
+      return x1;
+    }
+    startFall(kind, k, t) {
+      this.mode = 'air'; this.vx = 0; this.vy = Math.max(this.vy, 0); this.mining = null;
+      if (kind === 'hole') { this.mx = this.mine.G.colX(this.mine.ladders[k].c); this.falling = { toLvl: this.lvl + 1, toY: this.floorY(this.lvl + 1) }; }
+      else this.falling = { toLvl: this.lvl, toY: this.floorY(this.lvl) + S.pitDepth * T, pit: true, back: this.facing > 0 ? t.x0 - T * 0.35 : t.x1 + T * 0.35 };
+    }
+    landFall() {
+      const f = this.falling; this.falling = null;
+      this.mode = 'ground'; this.lvl = f.toLvl; this.my = f.toY; this.vx = this.vy = 0;
+      this.stun = S.fallStunSeconds; this.pitReturn = f.pit ? f.back : null;
+      this.cameras.main.shake(180, 0.004); Sound.knock && Sound.tick();
+      const spill = Math.round(this.bag.length * S.fallSpill);
+      for (let i = 0; i < spill; i++) this.bag.splice(Math.floor(Math.random() * this.bag.length), 1);
+      this.dust.explode(14, this.mx, this.my - 4);
+      if (spill) this.sparks.explode(10 * spill, this.mx, this.my - 10);
+      this.say('You fell. Stunned' + (spill ? ', and ' + spill + ' ore spilled from the bag.' : '.'), 3);
     }
 
-    // ---------- input ----------
-    down(p) {
-      Sound.unlock();
-      if (this.overlay || this.paused || !this.mine) return;
-      const w = this.cameras.main.getWorldPoint(p.x, p.y);
-      if (this.mining && Math.hypot(w.x - this.mining.x, w.y - this.mining.y) <= this.mining.r * S.nodeTouchSlop * 1.3) {
-        this.drag = { id: p.id, node: this.mining, x0: w.x, y0: w.y, x: w.x, y: w.y, len: 0 };
+    // off a ladder onto a floor; at the top he steps beside the open hole, not into it
+    stepOff(d, atTop, dir) {
+      const l = atTop ? d.top : d.bottom, lx = this.mine.G.colX(d.c), [x0, x1] = MineGen.span(this.mine, l);
+      this.mode = 'ground'; this.lvl = l; this.my = this.floorY(l); this.ladderK = null;
+      if (!atTop) return;
+      const off = S.holeHalf * T + 2, side = dir || this.facing || 1;
+      let x = lx + side * off;
+      if (x < x0 || x > x1) x = lx - side * off;
+      this.mx = clamp(x, x0, x1); this.facing = x > lx ? 1 : -1;
+    }
+
+    // E: mine a node beside you, or grab a ladder
+    action() {
+      if (this.mode !== 'ground' || this.stun > 0) return;
+      const L = this.lamp();
+      const near = this.nodes.filter((n) => n.l === this.lvl && Math.abs(n.x - this.mx) <= (S.oreStandGap + S.mineRange) * T)
+        .sort((a, b) => Math.abs(a.x - this.mx) - Math.abs(b.x - this.mx))[0];
+      if (near && this.hatch === 'open') {
+        if (!this.lampOn()) { this.say('Too dark to mine. Your lamp is out.', 2); return; }
+        if (this.bagWeight() + near.weight > S.bagCapacity + 1e-9) { this.say('Your bag is full. Drop ore or go up.', 2.5); return; }
+        // he stands beside a node, never on it
+        if (Math.abs(near.x - this.mx) < S.oreStandGap * T * 0.8) this.mx = near.standX;
+        if (Math.hypot(near.x - L.x, near.y - L.y) > S.lampReach * T + Math.abs(near.standX - this.mx)) return;
+        this.mining = near; this.facing = near.x < this.mx ? -1 : 1;
+        this.say('Drag along the crack to swing', 2);
         return;
       }
-      // a node you can see by your lamp: walk to it and get ready to swing
-      if (this.hatch === 'open') {
-        let best = null, bd = Infinity;
-        for (const n of this.nodes) {
-          const d = Math.hypot(w.x - n.x, w.y - n.y);
-          if (d <= n.r * S.nodeTouchSlop && d < bd && this.lit(n)) { best = n; bd = d; }
-        }
-        if (best) {
-          if (this.bagWeight() + best.weight > S.bagCapacity + 1e-9) { this.say('Your bag is full. Drop ore or go up.', 2.5); return; }
-          this.mining = null; this.pending = best;
-          this.goTo({ kind: 'level', l: best.l, x: best.standX });
-          if (!this.steps.length) this.arrive();
+      const m = this.mine;
+      let best = -1, bd = Infinity;
+      m.ladders.forEach((d, k) => {
+        const dx = Math.abs(m.G.colX(d.c) - this.mx);
+        const ok = (d.top === this.lvl && dx <= S.grabRangeDown * T) || (d.bottom === this.lvl && dx <= S.grabRange * T);
+        if (ok && dx < bd) { best = k; bd = dx; }
+      });
+      if (best < 0) return;
+      if (m.ladders[best].top === -1 && this.lvl === -1 && this.hatch !== 'open') { this.say('The hatch is shut.', 2); return; }
+      this.mode = 'ladder'; this.ladderK = best; this.mx = m.G.colX(m.ladders[best].c); this.mining = null;
+    }
+
+    physics(dt) {
+      const press = this.press; this.press = { jump: false, action: false };
+      this.moving = false;
+      if (this.stun > 0) {
+        this.stun -= dt;
+        if (this.stun <= 0) { this.stun = 0; if (this.pitReturn != null) { this.mx = this.pitReturn; this.my = this.floorY(this.lvl); this.pitReturn = null; } }
+        return;
+      }
+      const f = this.factor(), onLadder = this.mode === 'ladder';
+      const left = this.keys.left || (!onLadder && this.pad.left), right = this.keys.right || (!onLadder && this.pad.right);
+      const up = this.keys.up || (onLadder && this.pad.left), down = this.keys.down || (onLadder && this.pad.right);
+      const dir = (right ? 1 : 0) - (left ? 1 : 0);
+      if (press.action) this.action();
+      if (this.mode === 'ground') {
+        const fy = this.floorY(this.lvl), [x0, x1] = MineGen.span(this.mine, this.lvl);
+        if (dir && this.mining) this.mining = null;   // moving off leaves the node
+        if (press.jump && !this.mining) {
+          this.mode = 'air'; this.vy = -Math.sqrt(2 * S.gravity * S.jumpHeight);
+          const air = 2 * Math.sqrt(2 * S.jumpHeight / S.gravity);
+          this.vx = dir * (S.jumpDistance / air) * (1 - (1 - S.fullBagJumpFactor) * this.fill());
+          if (dir) this.facing = dir;
           return;
         }
+        if (dir && !this.mining) {
+          this.facing = dir;
+          const nx = clamp(this.blockRubble(this.lvl, this.mx, this.mx + dir * S.runSpeed * f * dt, fy), x0, x1);
+          this.moving = Math.abs(nx - this.mx) > 1e-3; this.walkDist += Math.abs(nx - this.mx); this.mx = nx;
+        }
+        // walking into an open shaft or a gap without grabbing: a fall
+        const hole = this.holeAt(this.lvl, this.mx), gap = this.terrainAt(this.lvl, this.mx, 'gap');
+        if (hole >= 0 && this.lvl + 1 < S.levels) this.startFall('hole', hole);
+        else if (gap) this.startFall('gap', 0, gap);
+      } else if (this.mode === 'ladder') {
+        const d = this.mine.ladders[this.ladderK], y0 = this.floorY(d.top), y1 = this.floorY(d.bottom);
+        const v = up ? -S.climbSpeed * f : down ? S.slideSpeed * f : 0;
+        this.my += v * dt; this.climbDist += Math.abs(v * dt);
+        // he steps off only by climbing past an end; standing on a ladder's top or foot keeps hold of it
+        if (v < 0 && this.my <= y0) this.stepOff(d, true, dir);
+        else if (v > 0 && this.my >= y1) this.stepOff(d, false, dir);
+        else this.my = clamp(this.my, y0, y1);
+        if (this.mode === 'ladder' && dir && (this.my === y0 || this.my === y1)) this.stepOff(d, this.my === y0, dir);   // or by walking off at an end
+      } else {   // in the air: a jump, or a fall
+        this.vy += S.gravity * dt;
+        let nx = this.mx + this.vx * dt; const ny = this.my + this.vy * dt;
+        if (!this.falling) {
+          const [x0, x1] = MineGen.span(this.mine, this.lvl), fy = this.floorY(this.lvl);
+          nx = this.blockRubble(this.lvl, this.mx, nx, Math.min(ny, fy));
+          if (nx < x0 || nx > x1) { nx = clamp(nx, x0, x1); this.vx = 0; }
+          this.mx = nx;
+          if (ny >= fy && this.vy > 0) {
+            const hole = this.holeAt(this.lvl, this.mx), gap = this.terrainAt(this.lvl, this.mx, 'gap');
+            if (hole >= 0 && this.lvl + 1 < S.levels) { this.my = fy; this.startFall('hole', hole); }
+            else if (gap) { this.my = fy; this.startFall('gap', 0, gap); }
+            else { this.my = fy; this.mode = 'ground'; this.vx = this.vy = 0; }
+          } else this.my = ny;
+        } else {
+          this.my = ny;
+          if (this.my >= this.falling.toY) { this.my = this.falling.toY; this.landFall(); }
+        }
       }
-      // anywhere else: walk there, by ladders if need be
-      this.mining = null; this.pending = null;
-      this.goTo(MineGen.nearest(this.mine, w.x, w.y).loc);
+    }
+
+    // ---------- input: dragging along the crack ----------
+    down(p) {
+      Sound.unlock();
+      if (this.overlay || this.paused || !this.mine || !this.mining) return;
+      const w = this.cameras.main.getWorldPoint(p.x, p.y);
+      if (Math.hypot(w.x - this.mining.x, w.y - this.mining.y) <= this.mining.r * S.nodeTouchSlop * 1.3) {
+        this.drag = { id: p.id, node: this.mining, x0: w.x, y0: w.y, x: w.x, y: w.y, len: 0 };
+      }
     }
     move(p) {
       const d = this.drag; if (!d || d.id !== p.id) return;
@@ -350,14 +502,6 @@
       const dx = d.x - d.x0, dy = d.y - d.y0, disp = Math.hypot(dx, dy);
       if (disp < S.swingMinLength || this.mining !== d.node || !this.nodes.includes(d.node)) return;
       this.swing(d.node, dx, dy, disp, d.len);
-    }
-    arrive() {
-      const n = this.pending; this.pending = null;
-      if (!n || !this.nodes.includes(n)) return;
-      const L = this.lamp();
-      if (Math.hypot(n.x - L.x, n.y - L.y) > S.lampReach * T || !this.lampOn()) return;
-      this.mining = n; this.facing = n.x < this.mx ? -1 : 1;
-      this.say('Drag along the crack to swing', 2);
     }
 
     // the same swing rule as the rope version: a clean drag breaks a node in 2 swings, a sloppy one in up to 5
@@ -404,12 +548,12 @@
       if (this.mine && !this.paused && !this.overlay) {
         this.spawn(dt);
         const wasBelow = this.below();
-        this.walk(dt);
+        this.physics(dt);
         const below = this.below();
         if (below && !wasBelow && !this.inShift) { this.inShift = true; records.get().shifts++; records.save(); }
         if (!below && wasBelow) this.bank();
         const h = this.here();
-        if (h && h.kind === 'level' && h.l >= 0 && h.l + 1 > records.get().deepestLevel) { records.get().deepestLevel = h.l + 1; records.save(); }
+        if (this.mode === 'ground' && h.l >= 0 && h.l + 1 > records.get().deepestLevel) { records.get().deepestLevel = h.l + 1; records.save(); }
         if (below && this.oil > 0) {
           this.oil = Math.max(0, this.oil - S.oilBurnPerSecond * dt);
           if (this.oil === 0) this.lampDied();
@@ -426,33 +570,20 @@
       this.hud();
     }
 
-    walk(dt) {
-      let left = dt;
-      while (left > 0 && this.steps.length) {
-        const s = this.steps[0], dx = s.x - this.mx, dy = s.y - this.my, dist = Math.hypot(dx, dy);
-        this.ctx = s.ctx;
-        const sp = this.speeds(), v = s.ctx.kind === 'level' ? sp.walk : dy < 0 ? sp.up : sp.down;
-        if (dx) this.facing = dx < 0 ? -1 : 1;
-        const moved = Math.min(dist, v * left);
-        if (s.ctx.kind === 'level') this.walkDist += moved; else this.climbDist += moved;
-        if (dist <= v * left) { this.mx = s.x; this.my = s.y; left -= dist / v; this.loc = s.loc; this.steps.shift(); }
-        else { this.mx += (dx / dist) * v * left; this.my += (dy / dist) * v * left; left = 0; }
-        this.walkT += dt;
-      }
-      if (!this.steps.length && this.ctx) { this.ctx = null; if (this.pending) this.arrive(); }
-    }
-
     lampDied() {
-      this.say('Your lamp is out. Tap where to go and feel your way.', 4);
+      this.say('Your lamp is out. Feel your way back to the ladders.', 4);
       const L = this.lamp(); this.smoke.explode(18, L.x, L.y);
     }
 
     draw() {
-      const lit = this.lampOn(), moving = this.steps.length > 0, onLadder = this.ctx && this.ctx.kind === 'ladder';
+      const lit = this.lampOn();
       const key = this.poseKey(), climbing = key === 'minerClimb', P = S.pose[key];
       const bob = 0;   // the walk frames carry the motion
       this.minerImg.setTexture(key).setScale((S.minerHeight * P.scale) / this.minerImg.height).setFlipX(this.facing < 0)
-        .setOrigin(this.facing < 0 ? 1 - P.bodyX : P.bodyX, 1).setPosition(this.mx, this.my - bob);
+        .setOrigin(this.facing < 0 ? 1 - P.bodyX : P.bodyX, 1).setPosition(this.mx, this.my - bob)
+        .setRotation(this.stun > 0 ? Math.sin(this.clock * 7) * 0.1 : 0);
+      // on a phone, the left and right buttons climb and slide while he is on a ladder
+      this.set('bLeft', this.mode === 'ladder' ? '▲' : '◀'); this.set('bRight', this.mode === 'ladder' ? '▼' : '▶');
       const L = this.lamp(); L.y -= bob;
       this.lampImg.setVisible(!lit).setPosition(L.x, L.y).setScale((L.h * 1.25) / this.lampImg.height);
       // the bag on his back: a quarter of his height empty, half full
@@ -506,14 +637,9 @@
     // ---------- HUD ----------
     bindHud() {
       const stop = (e) => e.stopPropagation();
-      ['drop', 'upBtn', 'recBtn', 'ovBtn', 'recClose', 'modeBtn'].forEach((id) => { $(id).addEventListener('pointerdown', stop); });
+      ['drop', 'recBtn', 'ovBtn', 'recClose', 'modeBtn'].forEach((id) => { $(id).addEventListener('pointerdown', stop); });
+      this.bindKeys();
       $('drop').onclick = () => { const p = this.bag.pop(); if (p) { Sound.tick(); this.say('Dropped ' + p.value + ' ore', 1.5); } };
-      $('upBtn').onclick = () => {
-        Sound.unlock();
-        if (!this.mine || this.overlay || this.paused) return;
-        this.mining = null; this.pending = null;
-        this.goTo({ kind: 'level', l: -1, x: this.mine.G.colX(this.mine.c0) - S.waitOffset * T });
-      };
       $('recBtn').onclick = () => {
         const r = records.get();
         $('rShifts').textContent = r.shifts; $('rDeep').textContent = r.deepestLevel;
@@ -543,6 +669,8 @@
       const w = this.bagWeight();
       this.set('bagW', (+w.toFixed(1)) + '/' + S.bagCapacity);
       this.set('bag', this.bagValue() + ' points' + (w >= S.bagCapacity ? ' · full' : ''));
+      const r = records.get(), firstShift = r.shifts < S.keysHintShifts || (r.shifts === S.keysHintShifts && this.inShift);
+      $('keys').style.display = firstShift ? '' : 'none';
       const mean = TEST ? S.testBlockSeconds : S.averageBlockSeconds, secs = this.climbOutSeconds();
       const pct = secs > 0 ? (1 - Math.exp(-secs / mean)) * 100 : 0;
       this.risk = pct;
