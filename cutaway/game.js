@@ -454,8 +454,7 @@
         if (dir && this.mining) this.mining = null;   // moving off leaves the node
         if (press.jump && !this.mining) {
           this.mode = 'air'; this.vy = -Math.sqrt(2 * S.gravity * S.jumpHeight);
-          const air = 2 * Math.sqrt(2 * S.jumpHeight / S.gravity);
-          this.vx = dir * (S.jumpDistance / air) * (1 - (1 - S.fullBagJumpFactor) * this.fill());
+          this.vx = dir * S.runSpeed * f;   // in the air he keeps his walking speed
           if (dir) this.facing = dir;
           return;
         }

@@ -10,7 +10,7 @@ A single-player practice mine timed by the real Bitcoin chain. One web page, Pha
 - Direct control. Keyboard: **A/D** or **←/→** run, **Space** jump, **E** grab a ladder (or start mining a node beside you), **W/S** climb up / slide down; then drag along the node's crack to swing (clean: 2 swings, sloppy: up to 5). Phone: on-screen ◀ ▶, Jump and E buttons; on a ladder ◀ ▶ become ▲ ▼. The controls are shown on screen during your first shift.
 - Ladders: he can walk straight across a ladder's top. Standing at a ladder's top or foot shows a ladder symbol with **E** above him; press E to grab it, then W/S. Next to a node it shows a pick with **E**. On a phone the E button shows the same symbol.
 - Falls happen only at gaps that need a jump: about 3 seconds stunned and a quarter of the bag spilled. Falls never kill.
-- Gaps and rubble need a jump: none on levels 1–3, more with depth. A full bag jumps about 60% as far as an empty one, and every gap and mound is narrow enough to clear with a full bag.
+- Gaps and rubble need a jump: none on levels 1–3, more with depth. In the air he keeps his walking speed, so a full bag (half speed) jumps half as far as an empty one; every gap and mound is narrow enough to clear with a full bag.
 - Speeds: an empty miner runs at 54 units/s, a full bag halves it; sliding down a ladder is three times climbing speed.
 - Fog of war: the lamp lights a few metres, tunnels you have walked stay dim, the rest is black. Ore from level 7 down glimmers in the dark.
 - Oil burns below the hatch (a full tank lasts about 10 minutes). A full bag halves walking and climbing speed. Passing the hatch banks the bag; if the next block knocks first, the bag is lost and it counts 1 death.

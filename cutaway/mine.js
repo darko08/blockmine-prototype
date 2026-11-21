@@ -114,7 +114,7 @@
   // ---------- gaps and rubble that need a jump ----------
   // none on levels 1-3, more with depth. Each is narrower than a jump with a full bag, so none is ever impossible.
   function jumpLimits(S) {
-    const full = S.jumpDistance * S.fullBagJumpFactor;
+    const air = 2 * Math.sqrt(2 * S.jumpHeight / S.gravity), full = S.runSpeed * S.fullBagSpeedFactor * air;   // a full-bag jump
     return { gap: Math.min(S.gapWidth[1], full * S.gapSafety), rubble: Math.min(S.rubbleWidth[1], full * S.rubbleSafety) };
   }
   function layoutTerrain(mine) {

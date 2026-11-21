@@ -30,9 +30,9 @@ window.SETTINGS = {
   slideSpeed: 46.5,                // down a ladder: three times climbing speed
   fullBagSpeedFactor: 0.5,         // a full bag moves at half the empty speed (scales linearly with weight)
   jumpHeight: 16,                  // world units
-  gravity: 420,
-  jumpDistance: 72,                // how far an empty jump carries (world units)
-  fullBagJumpFactor: 0.6,          // a full bag clears about 60% of an empty jump (scales linearly with weight)
+  gravity: 170,                    // with jumpHeight sets how long a jump lasts (about 0.87 s)
+  // in the air he keeps his walking speed, so a jump carries walking speed x air time:
+  // empty about 47 units (1.5 tiles), full bag about 23 (half: the bag halves his speed)
   grabRange: 0.6,                  // tiles: standing this close to a ladder's top or foot, E grabs it (he can walk across its top)
   mineRange: 0.7,                  // tiles past his standing spot that E still reaches a node
   fallStunSeconds: 3,              // falling into a gap (the only place he can fall): stunned this long
@@ -42,11 +42,11 @@ window.SETTINGS = {
   // --- Gaps and rubble, laid out from the block hash ---
   terrainPerZone: [[0, 0], [0, 1], [1, 2], [2, 3]],   // min, max per level: none on levels 1-3, more with depth
   gapShare: 0.5,                   // share of them that are gaps (the rest are rubble mounds)
-  gapWidth: [18, 40],              // world units (capped so a full bag can always clear it)
-  rubbleWidth: [16, 34],
+  gapWidth: [14, 40],              // world units (capped so a full bag can always clear it)
+  rubbleWidth: [12, 34],
   rubbleHeight: 9,
   gapSafety: 0.8,                  // the widest gap is this share of a full-bag jump
-  rubbleSafety: 0.5,               // the widest mound is this share of a full-bag jump (he must stay above it)
+  rubbleSafety: 0.6,               // the widest mound is this share of a full-bag jump (he must stay above it)
   keysHintShifts: 1,               // show the controls on screen for this many shifts
 
   // --- Lamp and oil ---
