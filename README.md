@@ -17,4 +17,4 @@ A single-player practice mine timed by the real Bitcoin chain. One web page, Pha
 ## Files
 - `settings.js` — every speed, cost and rate.
 - `js/` — game, chain feed, seeded randomness, sounds, records.
-- `Assets/` — painted pieces for pass 2, cut from `Assets/sheets/` by `tools/cut_sheets.py`. Replace a file to swap a piece, then bump `artVersion` in `settings.js` (and the `?v=` on the script tags when code changes) so browsers fetch the new files.
+- `Assets/` — painted pieces, cut from the eight sheets in `Assets/sheets/` (miner, ore, bag, lamp, hatch, timber, rock-upper, rock-deep) by `python tools/cut_sheets.py`, which also makes the rock backdrops loop and blend and prints the rope and lantern positions for `settings.js`. Replace a file to swap a piece, then bump `artVersion` in `settings.js` (and the `?v=` on the script tags when code changes) so browsers fetch the new files.

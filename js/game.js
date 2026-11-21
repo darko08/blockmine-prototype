@@ -56,21 +56,24 @@
     buildShaft(hw) {
       if (this.shaftObjs) this.shaftObjs.forEach((o) => o.destroy());
       const objs = this.shaftObjs = [], keep = (o) => { objs.push(o); return o; };
-      const far = 3000, top = -1500, split = 2 * S.levelHeight, bottom = DEPTH + 600;
+      // upper rock repeats from the top down to the middle of the mine, deep rock from there down. The upper rock
+      // starts a whole number of repeats above the change, so both paintings meet at their first row, where the
+      // join strip fades one into the other.
+      const k = S.rockScale, period = this.textures.get('rockUpper').getSourceImage().height * k;
+      const split = 2 * S.levelHeight, top = split - Math.ceil((split + 1600) / period) * period, bottom = DEPTH + 600, far = 3000;
+      const joinH = this.textures.get('rockJoin').getSourceImage().height * k;
       const tile = (x, y, w, h, key, tint) => {
-        const t = keep(this.add.tileSprite(x, y, w, h, key).setOrigin(0, 0).setTileScale(S.wallTextureScale));
-        t.tilePositionX = x / S.wallTextureScale; t.tilePositionY = y / S.wallTextureScale;
+        const t = keep(this.add.tileSprite(x, y, w, h, key).setOrigin(0, 0).setTileScale(k));
+        t.tilePositionX = x / k; t.tilePositionY = 0;
         if (tint) t.setTint(tint);
         return t;
       };
-      // back wall of the shaft (darker); the side walls: upper rock near the top, deep rock lower down; the floor
-      tile(-hw, top, 2 * hw, split - top, 'wall', 0x77716a).setDepth(Z.back);
-      tile(-hw, split, 2 * hw, bottom - split, 'deep', 0x8a7f76).setDepth(Z.back);
-      for (const x of [-hw - far, hw]) {
-        tile(x, top, far, split - top, 'wall').setDepth(Z.wall);
-        tile(x, split, far, bottom - split, 'deep').setDepth(Z.wall);
+      // the back of the shaft is a little darker than the side walls
+      for (const [x, w, z, tint] of [[-hw, 2 * hw, Z.back, 0x9a948c], [-hw - far, far, Z.wall, 0], [hw, far, Z.wall, 0]]) {
+        tile(x, top, w, split - top, 'rockUpper', tint).setDepth(z);
+        tile(x, split, w, bottom - split, 'rockDeep', tint).setDepth(z);
+        tile(x, split, w, joinH, 'rockJoin', tint).setDepth(z + 0.01);
       }
-      tile(-hw, DEPTH, 2 * hw, bottom - DEPTH, 'deep').setDepth(Z.wall);
       // timber sets: a cross beam at every level line, its ends tucked under the posts down both edges
       const beamY = (l) => l * S.levelHeight;
       for (let l = 0; l < S.levels; l++) {
@@ -89,19 +92,20 @@
       // level numbers on the back wall, clear of the posts and beams
       for (let l = 0; l < S.levels; l++) {
         const side = l % 2 ? 1 : -1;
-        keep(this.add.text(side * (hw - pw / 2 - 12), beamY(l) + S.beamThickness / 2 + 10, ['I', 'II', 'III', 'IV'][l] || String(l + 1),
-          { fontFamily: '"Cormorant Garamond", Georgia, serif', fontSize: '24px', color: '#b08d57' })
-          .setOrigin(side > 0 ? 1 : 0, 0).setDepth(Z.crack).setAlpha(0.6));
+        keep(this.add.text(side * (hw - pw / 2 - 10), beamY(l) + S.beamThickness / 2 + 8, ['I', 'II', 'III', 'IV'][l] || String(l + 1),
+          { fontFamily: '"Cormorant Garamond", Georgia, serif', fontSize: '40px', fontStyle: '500', color: '#ffd28a',
+            stroke: '#000000', strokeThickness: 4, shadow: { blur: 10, color: '#ff9a30', fill: true } })
+          .setOrigin(side > 0 ? 1 : 0, 0).setDepth(Z.glow + 0.5));
       }
       const key = this.hatchImg ? this.hatchImg.texture.key : 'hatchShut';
       this.hatchImg = keep(this.add.image(0, 26, key).setOrigin(0.5, 1).setDepth(Z.hatch));
-      this.hatchImg.setScale(Math.min(2 * hw - pw - 20, 300) / this.hatchImg.width);
+      this.hatchImg.setScale(Math.min(2 * hw - pw, 240) / this.hatchImg.width);
     }
 
     // ore sits in the rock wall just past the post; the lamp-reach rule uses reachDx, which doesn't depend on the screen
     placeNode(n) {
-      n.x = n.side * (this.hw + S.postWidth / 2 + n.r * 0.85 + n.inset);
-      n.img.x = n.x; n.glow.x = n.x;
+      n.x = n.side * (this.hw + S.postWidth / 2 + n.r * 0.6 + n.inset * 0.6);
+      n.img.x = n.x; n.glow.x = n.x; n.halo.x = n.x;
     }
 
     buildMiner() {
@@ -111,8 +115,7 @@
       this.poseB = this.add.image(0, 0, 'minerHang').setDepth(Z.miner).setAlpha(0);
       this.pose = { key: '', flip: false };
       this.setPose('minerHang', false, true);
-      this.lampImg = this.add.image(0, 0, 'lampLit').setOrigin(0.5, 0).setDepth(Z.lamp);
-      this.lampImg.setScale(S.lampHeight / this.lampImg.height);
+      this.lampImg = this.add.image(0, 0, 'lampOut').setDepth(Z.lamp).setVisible(false);
       this.flame = this.add.image(0, 0, 'glow').setDepth(Z.light).setTint(0xffc060).setBlendMode('ADD').setAlpha(0.7).setDisplaySize(34, 34);
     }
 
@@ -158,9 +161,10 @@
     fitCamera() {
       const cam = this.cameras.main, W = this.scale.width, H = this.scale.height;
       cam.setSize(W, H);
-      const zoom = Math.min(W / S.viewWidth, H / S.viewHeightMin);
+      const zoom = (H * S.minerScreenShare) / S.minerHeight;
       cam.setZoom(zoom);
-      const hw = Math.round(clamp((W / zoom) * S.shaftScreenFraction / 2, S.shaftHalfWidthMin, S.shaftHalfWidthMax));
+      const frac = W < H ? S.shaftScreenFractionNarrow : S.shaftScreenFraction;
+      const hw = Math.round(clamp((W / zoom) * frac / 2, S.shaftHalfWidthMin, S.shaftHalfWidthMax));
       if (hw !== this.hw) { this.hw = hw; this.buildShaft(hw); this.nodes.forEach((n) => this.placeNode(n)); }
     }
 
@@ -214,16 +218,17 @@
         const tilt = (rng() - 0.5) * 0.6 - side * 0.5;
         if (this.nodes.some((n) => Math.hypot(n.side * n.reachDx - side * reachDx, n.y - y) < n.r + r + 10)) continue;
         const n = { id: this.mine.nextId++, side, reachDx, inset: xr * 14, y, r, crack, value, weight: S.oreWeight[level], level, hp: 1, flash: 0 };
-        n.img = this.add.image(0, y, 'crystal' + Math.min(level, 3)).setDepth(Z.ore).setRotation(tilt).setTint(S.oreTint);
-        n.size = (r * 4.2) / n.img.width; n.img.setScale(n.size);
-        n.glow = this.add.image(0, y, 'glow').setDepth(Z.glow).setTint(S.oreTint).setBlendMode('ADD').setDisplaySize(r * 5, r * 5);
+        n.img = this.add.image(0, y, 'crystal' + Math.min(level, 3)).setDepth(Z.ore).setRotation(tilt * 0.5 - side * 0.35).setTint(S.oreTint);
+        n.size = (r * 3.6) / n.img.width; n.img.setScale(n.size);
+        n.glow = this.add.image(0, y, 'glow').setDepth(Z.glow).setTint(0xffa040).setBlendMode('ADD').setDisplaySize(r * 4, r * 4);
+        n.halo = this.add.image(0, y, 'glow').setDepth(Z.glow).setTint(0xff6a10).setBlendMode('ADD').setDisplaySize(r * 11, r * 11);
         this.placeNode(n);
         this.nodes.push(n);
         return;
       }
     }
-    removeNode(n) { n.img.destroy(); n.glow.destroy(); this.nodes = this.nodes.filter((x) => x !== n); }
-    clearNodes() { for (const n of this.nodes) { n.img.destroy(); n.glow.destroy(); } this.nodes = []; }
+    removeNode(n) { n.img.destroy(); n.glow.destroy(); n.halo.destroy(); this.nodes = this.nodes.filter((x) => x !== n); }
+    clearNodes() { for (const n of this.nodes) { n.img.destroy(); n.glow.destroy(); n.halo.destroy(); } this.nodes = []; }
 
     spawn(dt) {
       if (this.hatch !== 'open' || this.nodes.length >= S.maxNodes) return;
@@ -350,7 +355,7 @@
       }
       for (const n of this.nodes) n.flash = Math.max(0, n.flash - dt);
       // at a node he swings over on the rope until the pick reaches the wall
-      const targetX = this.mining ? this.mining.side * Math.max(0, this.hw - 68) : 0;
+      const targetX = this.mining ? this.mining.side * Math.max(0, this.hw - 45) : 0;
       this.minerX += (targetX - this.minerX) * Math.min(1, dt * 8);
       const cam = this.cameras.main;
       cam.centerOn(0, this.minerY + (cam.height / cam.zoom) * S.cameraLead);
@@ -374,11 +379,14 @@
       const top = y - S.minerHeight * 0.42;
       this.poseA.setPosition(x, top); this.poseB.setPosition(x, top);
 
-      // lamp on the belt
-      const facing = this.pose.flip ? -1 : 1;
-      this.lampX = x + 22 * facing; this.lampY = y + 2;
-      this.lampImg.setTexture(lit ? 'lampLit' : 'lampOut').setPosition(this.lampX, this.lampY);
-      this.flame.setVisible(lit).setPosition(this.lampX, this.lampY + S.lampHeight * 0.62)
+      // one lamp: the lantern painted on his belt in every pose. When the oil is gone, the dead lantern covers it.
+      const pk = this.pose.key, facing = this.pose.flip ? -1 : 1, pw = this.poseA.displayWidth, ox = S.ropeX[pk];
+      const at = (fx) => x + (fx - ox) * pw * facing;                  // a point across the pose, in the world
+      const lan = S.lantern[pk];
+      this.lampX = at(lan.x); this.lampY = top + lan.y * S.minerHeight;
+      const lh = lan.h * S.minerHeight;
+      this.lampImg.setVisible(!lit).setPosition(this.lampX, this.lampY - lh * 0.08).setScale((lh * 1.3) / this.lampImg.height);
+      this.flame.setVisible(lit).setPosition(this.lampX, this.lampY).setDisplaySize(lh * 1.6, lh * 1.6)
         .setAlpha(0.55 + 0.15 * Math.sin(this.clock * 11) + 0.08 * Math.sin(this.clock * 23));
 
       // the rope from the headframe to his hands
@@ -389,8 +397,7 @@
       const bagKey = !hasOre ? 'bagEmpty' : fill < 0.6 ? 'bagHalf' : 'bagFull';
       const bh = S.bagHeight[0] + (S.bagHeight[1] - S.bagHeight[0]) * fill;
       const sway = Math.sin(this.clock * 2.1) * 0.08 * (1 - fill);
-      const bx = x - 12 * facing, by = top + S.minerHeight * S.beltY;
-      g.lineStyle(2, 0x8a7350, 1); g.lineBetween(x - 4 * facing, by - 2, bx, by + 4);
+      const bx = at(S.hipX[pk]), by = top + S.minerHeight * S.beltY;    // its handle on his hip
       this.bagImg.setVisible(true).setTexture(bagKey).setOrigin(S.ropeX[bagKey], 0).setPosition(bx, by).setRotation(sway);
       this.bagImg.setScale(bh / this.bagImg.height);
 
@@ -400,7 +407,8 @@
         const s = n.size * (0.6 + 0.4 * n.hp) * (n.flash > 0 ? 1.08 : 1);
         n.img.setScale(s);
         if (n.flash > 0) n.img.setTintFill(0xfff1c8); else n.img.setTint(S.oreTint);
-        n.glow.setAlpha(S.oreGlowInDark * (0.55 + 0.45 * n.hp) * (0.85 + 0.15 * Math.sin(this.clock * 1.7 + n.id)));
+        const pulse = (0.55 + 0.45 * n.hp) * (0.85 + 0.15 * Math.sin(this.clock * 1.7 + n.id));
+        n.glow.setAlpha(S.oreGlowInDark * pulse); n.halo.setAlpha(S.oreRockGlow * pulse);
         if (n !== this.mining) continue;              // the crack shows only on the node you have chosen
         const cx = Math.cos(n.crack) * n.r * 1.35, cy = Math.sin(n.crack) * n.r * 1.35;
         cg.lineStyle(3, 0x120a02, 0.85); cg.lineBetween(n.x - cx, n.y - cy, n.x + cx, n.y + cy);
@@ -410,7 +418,7 @@
 
       // darkness over the whole shaft, a soft warm circle cut around the lamp
       const v = this.cameras.main.worldView, dg = this.darkG; dg.clear();
-      const lx = this.lampX, ly = this.lampY + S.lampHeight * 0.6;
+      const lx = this.lampX, ly = this.lampY;
       this.warm.setVisible(lit).setPosition(lx, ly).setAlpha(0.26 + 0.03 * Math.sin(this.clock * 9));
       dg.fillStyle(0x000000, S.darkness);
       const L = v.x - 20, T = v.y - 20, R = v.right + 20, B = v.bottom + 20;
