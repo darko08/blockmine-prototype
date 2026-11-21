@@ -45,8 +45,30 @@ window.SETTINGS = {
   sloppyAt: 0.45,                  // at or below this = sloppiest
   nodeTouchSlop: 2.4,              // press within radius x this counts as pressing the node
 
+  // --- Art (pass 2). Swap any piece by replacing its file; set a crystal entry to a file path to replace the drawn crystals.
+  art: {
+    wall: 'Assets/tex_wall.webp', deep: 'Assets/tex_deep.webp',
+    minerHang: 'Assets/miner_hang.webp', minerSwing: 'Assets/miner_swing.webp', minerClimb: 'Assets/miner_climb.webp',
+    bagEmpty: 'Assets/bag_empty.webp', bagHalf: 'Assets/bag_half.webp', bagFull: 'Assets/bag_full.webp',
+    lampLit: 'Assets/lamp_lit.webp', lampOut: 'Assets/lamp_out.webp',
+    hatchOpen: 'Assets/hatch_open.webp', hatchShut: 'Assets/hatch_shut.webp',
+    beamH: 'Assets/beam_horizontal.webp', beamV: 'Assets/beam_vertical.webp', beamD: 'Assets/beam_diagonal.webp',
+    crystals: null,   // e.g. ['Assets/crystal_1.webp', 'Assets/crystal_2.webp', 'Assets/crystal_3.webp', 'Assets/crystal_4.webp'] (one per level)
+  },
+  // where the rope meets each painted piece, as a fraction of its width (measured by tools/cut_sheets.py)
+  ropeX: { minerHang: 0.454, minerSwing: 0.077, minerClimb: 0.556, bagEmpty: 0.356, bagHalf: 0.336, bagFull: 0.384, lampLit: 0.5, lampOut: 0.5 },
+  minerHeight: 150,       // world units
+  lampHeight: 40,
+  bagHeight: [46, 76],    // empty -> full
+  bagRope: [26, 44],      // rope length empty -> full (the bag pulls it down)
+  wallTextureScale: 0.55,
+  lightRadius: 280,       // soft warm circle around the lamp (world units)
+  darkness: 0.96,         // how black the unlit shaft is
+  oreGlowInDark: 0.32,    // ore glows faintly even in the dark
+  poseFadeMs: 140,        // the miner slides between his 3 poses
+
   // --- Camera ---
-  viewWidth: 440,                  // world units visible across (shaft plus some wall)
+  viewWidth: 420,                  // world units visible across (shaft plus some wall)
   viewHeightMin: 620,
   cameraLead: 0.12,                // look a little below the miner
 };

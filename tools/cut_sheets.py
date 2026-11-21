@@ -58,10 +58,10 @@ for sheet, names in PLAN.items():
         print(f'{sheet}: found {len(boxes)} pieces, expected {len(names)}: {boxes}'); continue
     for name, b in zip(names, boxes):
         s = img.crop(b); s.thumbnail((MAX, MAX), Image.LANCZOS)
-        s.save(os.path.join(OUT, name + '.png'), optimize=True)
+        s.save(os.path.join(OUT, name + '.webp'), quality=86, method=6)
         print(name, s.size)
 for tex in ['tex_wall', 'tex_deep']:
     p = os.path.join(SHEETS, tex + '.png')
     if os.path.exists(p):
-        Image.open(p).convert('RGB').resize((512, 512), Image.LANCZOS).save(os.path.join(OUT, tex + '.jpg'), quality=82)
-        print(tex, '512x512 jpg')
+        Image.open(p).convert('RGB').resize((512, 512), Image.LANCZOS).save(os.path.join(OUT, tex + '.webp'), quality=80, method=6)
+        print(tex, '512x512 webp')
