@@ -80,6 +80,12 @@ window.SETTINGS = {
   pileSink: 2,                     // a pile is sunk this far into the floor
   pileShade: 0.6,                  // a soft dark patch behind each pile so it stands out from the painted wall
   bitcoinGlow: 0.5,                // Bitcoin ore's glow (the only deposit that glows)
+  // the deep tunnels are painted lava orange, so there Bitcoin ore glows brighter and paler, burns with its own light
+  // and has a darker patch behind it. By zone: levels 1-3, 4-6, 7-9, 10-12.
+  bitcoinGlowByZone: [1, 1, 1.15, 1.7],                         // times bitcoinGlow
+  bitcoinGlowTint: [0xff8a30, 0xff8a30, 0xffa848, 0xffe2a0],    // from orange to pale gold
+  bitcoinShine: [0, 0, 0.18, 0.5],                              // the pile itself lit up (a bright copy laid over it)
+  bitcoinShade: [0.6, 0.6, 0.7, 0.9],                           // the dark patch behind it (other piles use pileShade)
   bitcoinPulseSeconds: 3.5,        // one slow pulse
   glimmer: 0.28,                   // Bitcoin ore shows as a faint glimmer through the fog; nothing else does
   silverShimmer: 0.2,              // silver's faint cold shimmer, seen only in the lamp light

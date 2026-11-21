@@ -317,12 +317,14 @@
       } else {                    // Bitcoin ore, iron and silver: a pile on the floor against the back wall
         n.img = this.add.image(n.x, n.base, 'ore_' + n.kind + '_' + n.pile).setOrigin(0.5, 1).setDepth(Z.ore).setFlipX(n.crack > Math.PI / 2);
         n.size = n.h / n.img.height;
-        n.shade = this.add.image(n.x, n.base - n.h * 0.45, 'glow').setDepth(Z.ore - 0.5).setTint(0x000000).setAlpha(S.pileShade).setDisplaySize(n.h * 3, n.h * 1.9);
+        const shade = n.kind === 'bitcoin' ? S.bitcoinShade[n.zone] : S.pileShade;
+        n.shade = this.add.image(n.x, n.base - n.h * 0.45, 'glow').setDepth(Z.ore - 0.5).setTint(0x000000).setAlpha(shade).setDisplaySize(n.h * 3, n.h * 1.9);
       }
       n.img.setScale(n.size);
-      n.glow = n.glim = null;
+      n.glow = n.glim = n.shine = null;
       if (n.kind === 'bitcoin') {   // the only deposit that glows, and the only one that glimmers through the fog
-        n.glow = this.add.image(n.x, n.y, 'glow').setDepth(Z.oreGlow).setTint(n.rich ? 0xfff0b0 : 0xff8a30).setBlendMode('ADD').setDisplaySize(n.h * 3.4, n.h * 3.4);
+        n.glow = this.add.image(n.x, n.y, 'glow').setDepth(Z.oreGlow).setTint(n.rich ? 0xfff0b0 : S.bitcoinGlowTint[n.zone]).setBlendMode('ADD').setDisplaySize(n.h * 3.4, n.h * 3.4);
+        if (S.bitcoinShine[n.zone] > 0) n.shine = this.add.image(n.x, n.base, n.img.texture.key).setOrigin(0.5, 1).setFlipX(n.img.flipX).setDepth(Z.ore + 0.1).setBlendMode('ADD');
         n.glim = this.add.image(n.x, n.y, 'glow').setDepth(Z.glimmer).setTint(n.rich ? 0xfff0b0 : 0xff7a20).setBlendMode('ADD').setDisplaySize(n.h * 1.6, n.h * 1.6);
       } else if (n.kind === 'silver') {   // a faint cold shimmer, only where the lamp shows it
         n.glow = this.add.image(n.x, n.y, 'glow').setDepth(Z.oreGlow).setTint(0xcfe0ff).setBlendMode('ADD').setDisplaySize(n.h * 2.2, n.h * 2.2);
@@ -330,7 +332,7 @@
       this.nodes.push(n);
     }
     removeNode(n) {
-      n.img.destroy(); n.glow && n.glow.destroy(); n.glim && n.glim.destroy(); n.shade && n.shade.destroy();
+      n.img.destroy(); n.glow && n.glow.destroy(); n.glim && n.glim.destroy(); n.shade && n.shade.destroy(); n.shine && n.shine.destroy();
       this.nodes = this.nodes.filter((x) => x !== n);
       this.mine.nodes = this.mine.nodes.filter((x) => x !== n);
     }
@@ -440,16 +442,18 @@
     // what E does right now: mine a node beside him, or grab the ladder at whose top or foot he stands
     target() {
       if (this.mode !== 'ground' || this.stun > 0 || this.mining || !this.mine) return null;
-      const near = this.nodes.filter((n) => n.l === this.lvl && Math.abs(n.x - this.mx) <= (S.oreStandGap + S.mineRange) * T)
-        .sort((a, b) => Math.abs(a.x - this.mx) - Math.abs(b.x - this.mx))[0];
-      if (near && this.hatch === 'open') return { kind: 'node', n: near };
+      // standing at a ladder's top or foot, E always grabs the ladder, even with a deposit close by
+      // (nodes keep clear of ladders, so his standing spot beside a node is never at a ladder)
       const m = this.mine;
       let best = -1, bd = Infinity;
       m.ladders.forEach((d, k) => {
         const dx = Math.abs(m.G.colX(d.c) - this.mx);
         if ((d.top === this.lvl || d.bottom === this.lvl) && dx <= S.grabRange * T && dx < bd) { best = k; bd = dx; }
       });
-      return best >= 0 ? { kind: 'ladder', k: best } : null;
+      if (best >= 0) return { kind: 'ladder', k: best };
+      const near = this.nodes.filter((n) => n.l === this.lvl && Math.abs(n.x - this.mx) <= (S.oreStandGap + S.mineRange) * T)
+        .sort((a, b) => Math.abs(a.x - this.mx) - Math.abs(b.x - this.mx))[0];
+      return near && this.hatch === 'open' ? { kind: 'node', n: near } : null;
     }
 
     // E: mine a node beside you, or grab a ladder
@@ -677,7 +681,8 @@
         if (n.flash > 0) n.img.setTintFill(0xfff1c8); else n.img.clearTint();
         if (n.kind === 'bitcoin') {   // a slow pulse
           const pulse = 0.7 + 0.3 * Math.sin((this.clock / S.bitcoinPulseSeconds) * Math.PI * 2 + n.id);
-          n.glow.setAlpha(S.bitcoinGlow * pulse * (0.5 + 0.5 * n.hp));
+          n.glow.setAlpha(Math.min(1, S.bitcoinGlow * S.bitcoinGlowByZone[n.zone] * pulse * (0.5 + 0.5 * n.hp)));
+          if (n.shine) n.shine.setScale(n.img.scaleX).setAlpha(S.bitcoinShine[n.zone] * pulse);
           n.glim.setAlpha(S.glimmer * pulse * (0.6 + 0.4 * n.hp));
         } else if (n.kind === 'silver') {
           const w = S.silverShimmerSpeed * this.clock + n.id;
