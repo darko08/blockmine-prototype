@@ -11,6 +11,11 @@
   };
   const Z = { sky: 0, rock: 1, tunnel: 2, ladder: 3, ore: 4, oreGlow: 5, crack: 6, bag: 7, miner: 8, lamp: 9, light: 10, sparks: 11, fog: 20, glimmer: 21, hatch: 3.5, label: 23, fx: 24 };
   const FONT = '"Cormorant Garamond", Georgia, serif';
+  // the phone action button's symbols (same drawings as the prompt above his head)
+  const ICON = {
+    ladder: '<svg viewBox="0 0 64 64" width="34" height="34" fill="none" stroke="#e0b878" stroke-width="6" stroke-linecap="round"><path d="M18 6V58M46 6V58M18 16H46M18 28H46M18 40H46M18 52H46"/></svg>',
+    pick: '<svg viewBox="0 0 64 64" width="34" height="34" fill="none" stroke="#e0b878" stroke-linecap="round"><path d="M14 54L44 18" stroke-width="6"/><path d="M18 14Q40 4 58 30" stroke-width="7"/></svg>',
+  };
 
   const records = Records(TEST, 'cutaway');
   if (TEST) $('test').style.display = 'block';
@@ -101,6 +106,19 @@
           c.beginPath(); c.ellipse(x, Math.min(n - r * 0.6, y), r * 1.3, r, rng() * 3, 0, Math.PI * 2); c.fill();
           c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); c.ellipse(x + 1, Math.min(n - r * 0.3, y + r * 0.5), r, r * 0.45, 0, 0, Math.PI * 2); c.fill();
         }
+      });
+      // small brass symbols for the E prompt: a ladder and a pick
+      const brass = '#e0b878';
+      canvas('iconLadder', 64, (c, n) => {
+        c.strokeStyle = brass; c.lineWidth = 6; c.lineCap = 'round';
+        c.beginPath(); c.moveTo(18, 6); c.lineTo(18, 58); c.moveTo(46, 6); c.lineTo(46, 58);
+        for (const y of [16, 28, 40, 52]) { c.moveTo(18, y); c.lineTo(46, y); }
+        c.stroke();
+      });
+      canvas('iconPick', 64, (c, n) => {
+        c.strokeStyle = brass; c.lineCap = 'round';
+        c.lineWidth = 6; c.beginPath(); c.moveTo(14, 54); c.lineTo(44, 18); c.stroke();
+        c.lineWidth = 7; c.beginPath(); c.moveTo(18, 14); c.quadraticCurveTo(40, 4, 58, 30); c.stroke();
       });
       canvas('dot', 16, (c, n) => {
         const g = c.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
@@ -195,7 +213,11 @@
 
     buildMiner() {
       this.minerImg = this.add.image(0, 0, 'minerStand').setOrigin(0.5, 1).setDepth(Z.miner);
-      this.lampImg = this.add.image(0, 0, 'lampOut').setDepth(Z.lamp).setVisible(false);   // covers his lantern once the oil is gone
+      this.lampImg = this.add.image(0, 0, 'lampOut').setDepth(Z.lamp).setVisible(false);
+      // the E prompt above his head: a symbol for what E will do, and the key
+      this.promptBg = this.add.graphics().setDepth(Z.fx);
+      this.promptIcon = this.add.image(0, 0, 'iconLadder').setDepth(Z.fx).setDisplaySize(12, 12);
+      this.promptKey = this.add.text(0, 0, 'E', { fontFamily: FONT, fontSize: '33px', fontStyle: '600', color: '#efe8da' }).setOrigin(0.5).setScale(1 / 3).setDepth(Z.fx);   // covers his lantern once the oil is gone
       this.warm = this.add.image(0, 0, 'glow').setDepth(Z.light).setTint(0xff9a30).setBlendMode('ADD');
       this.bagGlow = this.add.image(0, 0, 'glow').setDepth(Z.glimmer).setTint(0xffb547).setBlendMode('ADD').setAlpha(0);
     }
@@ -347,14 +369,6 @@
       hold('bJump', () => { this.press.jump = true; }, () => {});
       hold('bAct', () => { this.press.action = true; }, () => {});
     }
-    holeAt(l, x) {   // the open hole where a ladder goes down from this level (the shaft only while the hatch is open)
-      const m = this.mine;
-      for (let k = 0; k < m.ladders.length; k++) {
-        const d = m.ladders[k];
-        if (d.top === l && Math.abs(m.G.colX(d.c) - x) < S.holeHalf * T && (l >= 0 || this.hatch === 'open')) return k;
-      }
-      return -1;
-    }
     terrainAt(l, x, kind) { return this.mine.terrain.find((t) => t.l === l && t.kind === kind && x > t.x0 && x < t.x1); }
     blockRubble(l, x0, x1, feetY) {   // stop at a rubble mound unless his feet are above it
       for (const t of this.mine.terrain) {
@@ -364,10 +378,9 @@
       }
       return x1;
     }
-    startFall(kind, k, t) {
+    startFall(kind, k, t) {   // only gaps make him fall: into the pit, then he climbs back out on the near side
       this.mode = 'air'; this.vx = 0; this.vy = Math.max(this.vy, 0); this.mining = null;
-      if (kind === 'hole') { this.mx = this.mine.G.colX(this.mine.ladders[k].c); this.falling = { toLvl: this.lvl + 1, toY: this.floorY(this.lvl + 1) }; }
-      else this.falling = { toLvl: this.lvl, toY: this.floorY(this.lvl) + S.pitDepth * T, pit: true, back: this.facing > 0 ? t.x0 - T * 0.35 : t.x1 + T * 0.35 };
+      this.falling = { toLvl: this.lvl, toY: this.floorY(this.lvl) + S.pitDepth * T, pit: true, back: this.facing > 0 ? t.x0 - T * 0.35 : t.x1 + T * 0.35 };
     }
     landFall() {
       const f = this.falling; this.falling = null;
@@ -381,24 +394,34 @@
       this.say('You fell. Stunned' + (spill ? ', and ' + spill + ' ore spilled from the bag.' : '.'), 3);
     }
 
-    // off a ladder onto a floor; at the top he steps beside the open hole, not into it
+    // off a ladder onto the floor at its top or foot
     stepOff(d, atTop, dir) {
-      const l = atTop ? d.top : d.bottom, lx = this.mine.G.colX(d.c), [x0, x1] = MineGen.span(this.mine, l);
+      const l = atTop ? d.top : d.bottom;
       this.mode = 'ground'; this.lvl = l; this.my = this.floorY(l); this.ladderK = null;
-      if (!atTop) return;
-      const off = S.holeHalf * T + 2, side = dir || this.facing || 1;
-      let x = lx + side * off;
-      if (x < x0 || x > x1) x = lx - side * off;
-      this.mx = clamp(x, x0, x1); this.facing = x > lx ? 1 : -1;
+      if (dir) this.facing = dir;
+    }
+
+    // what E does right now: mine a node beside him, or grab the ladder at whose top or foot he stands
+    target() {
+      if (this.mode !== 'ground' || this.stun > 0 || this.mining || !this.mine) return null;
+      const near = this.nodes.filter((n) => n.l === this.lvl && Math.abs(n.x - this.mx) <= (S.oreStandGap + S.mineRange) * T)
+        .sort((a, b) => Math.abs(a.x - this.mx) - Math.abs(b.x - this.mx))[0];
+      if (near && this.hatch === 'open') return { kind: 'node', n: near };
+      const m = this.mine;
+      let best = -1, bd = Infinity;
+      m.ladders.forEach((d, k) => {
+        const dx = Math.abs(m.G.colX(d.c) - this.mx);
+        if ((d.top === this.lvl || d.bottom === this.lvl) && dx <= S.grabRange * T && dx < bd) { best = k; bd = dx; }
+      });
+      return best >= 0 ? { kind: 'ladder', k: best } : null;
     }
 
     // E: mine a node beside you, or grab a ladder
     action() {
-      if (this.mode !== 'ground' || this.stun > 0) return;
-      const L = this.lamp();
-      const near = this.nodes.filter((n) => n.l === this.lvl && Math.abs(n.x - this.mx) <= (S.oreStandGap + S.mineRange) * T)
-        .sort((a, b) => Math.abs(a.x - this.mx) - Math.abs(b.x - this.mx))[0];
-      if (near && this.hatch === 'open') {
+      const tg = this.target();
+      if (!tg) return;
+      const L = this.lamp(), near = tg.kind === 'node' ? tg.n : null;
+      if (near) {
         if (!this.lampOn()) { this.say('Too dark to mine. Your lamp is out.', 2); return; }
         if (this.bagWeight() + near.weight > S.bagCapacity + 1e-9) { this.say('Your bag is full. Drop ore or go up.', 2.5); return; }
         // he stands beside a node, never on it
@@ -408,14 +431,7 @@
         this.say('Drag along the crack to swing', 2);
         return;
       }
-      const m = this.mine;
-      let best = -1, bd = Infinity;
-      m.ladders.forEach((d, k) => {
-        const dx = Math.abs(m.G.colX(d.c) - this.mx);
-        const ok = (d.top === this.lvl && dx <= S.grabRangeDown * T) || (d.bottom === this.lvl && dx <= S.grabRange * T);
-        if (ok && dx < bd) { best = k; bd = dx; }
-      });
-      if (best < 0) return;
+      const m = this.mine, best = tg.k;
       if (m.ladders[best].top === -1 && this.lvl === -1 && this.hatch !== 'open') { this.say('The hatch is shut.', 2); return; }
       this.mode = 'ladder'; this.ladderK = best; this.mx = m.G.colX(m.ladders[best].c); this.mining = null;
     }
@@ -448,10 +464,9 @@
           const nx = clamp(this.blockRubble(this.lvl, this.mx, this.mx + dir * S.runSpeed * f * dt, fy), x0, x1);
           this.moving = Math.abs(nx - this.mx) > 1e-3; this.walkDist += Math.abs(nx - this.mx); this.mx = nx;
         }
-        // walking into an open shaft or a gap without grabbing: a fall
-        const hole = this.holeAt(this.lvl, this.mx), gap = this.terrainAt(this.lvl, this.mx, 'gap');
-        if (hole >= 0 && this.lvl + 1 < S.levels) this.startFall('hole', hole);
-        else if (gap) this.startFall('gap', 0, gap);
+        // walking into a gap without jumping: a fall. Ladder openings are safe to walk across.
+        const gap = this.terrainAt(this.lvl, this.mx, 'gap');
+        if (gap) this.startFall('gap', 0, gap);
       } else if (this.mode === 'ladder') {
         const d = this.mine.ladders[this.ladderK], y0 = this.floorY(d.top), y1 = this.floorY(d.bottom);
         const v = up ? -S.climbSpeed * f : down ? S.slideSpeed * f : 0;
@@ -470,9 +485,8 @@
           if (nx < x0 || nx > x1) { nx = clamp(nx, x0, x1); this.vx = 0; }
           this.mx = nx;
           if (ny >= fy && this.vy > 0) {
-            const hole = this.holeAt(this.lvl, this.mx), gap = this.terrainAt(this.lvl, this.mx, 'gap');
-            if (hole >= 0 && this.lvl + 1 < S.levels) { this.my = fy; this.startFall('hole', hole); }
-            else if (gap) { this.my = fy; this.startFall('gap', 0, gap); }
+            const gap = this.terrainAt(this.lvl, this.mx, 'gap');
+            if (gap) { this.my = fy; this.startFall('gap', 0, gap); }
             else { this.my = fy; this.mode = 'ground'; this.vx = this.vy = 0; }
           } else this.my = ny;
         } else {
@@ -587,6 +601,16 @@
       this.minerImg.setTexture(key).setScale((S.minerHeight * P.scale) / this.minerImg.height).setFlipX(this.facing < 0)
         .setOrigin(this.facing < 0 ? 1 - P.bodyX : P.bodyX, 1).setPosition(this.mx, this.my - bob)
         .setRotation(this.stun > 0 ? Math.sin(this.clock * 7) * 0.1 : 0);
+      // the E prompt: a ladder when he stands at a ladder's top or foot, a pick when a node is beside him
+      const tg = this.target(), px = this.mx, py = this.my - S.minerHeight * 1.12, show = !!tg && !this.overlay;
+      this.promptBg.clear().setVisible(show); this.promptIcon.setVisible(show); this.promptKey.setVisible(show);
+      if (show) {
+        this.promptBg.fillStyle(0x080604, 0.85).fillRoundedRect(px - 15, py - 8, 30, 16, 3).lineStyle(1, 0xb08d57, 1).strokeRoundedRect(px - 15, py - 8, 30, 16, 3);
+        this.promptIcon.setTexture(tg.kind === 'node' ? 'iconPick' : 'iconLadder').setPosition(px - 6, py);
+        this.promptKey.setPosition(px + 7, py);
+      }
+      const sym = !tg ? 'E' : tg.kind === 'node' ? 'pick' : 'ladder';
+      if (this.last.bAct !== sym) { this.last.bAct = sym; $('bAct').innerHTML = sym === 'E' ? 'E' : ICON[sym]; }
       // on a phone, the left and right buttons climb and slide while he is on a ladder
       this.set('bLeft', this.mode === 'ladder' ? '▲' : '◀'); this.set('bRight', this.mode === 'ladder' ? '▼' : '▶');
       const L = this.lamp(); L.y -= bob;

@@ -33,11 +33,9 @@ window.SETTINGS = {
   gravity: 420,
   jumpDistance: 72,                // how far an empty jump carries (world units)
   fullBagJumpFactor: 0.6,          // a full bag clears about 60% of an empty jump (scales linearly with weight)
-  grabRange: 0.6,                  // tiles: E grabs a ladder going up this close to it
-  grabRangeDown: 0.95,             // tiles: and one going down from beside its hole
-  holeHalf: 0.42,                  // tiles: half the width of the open hole where a ladder goes down
+  grabRange: 0.6,                  // tiles: standing this close to a ladder's top or foot, E grabs it (he can walk across its top)
   mineRange: 0.7,                  // tiles past his standing spot that E still reaches a node
-  fallStunSeconds: 3,              // falling one level (or into a gap): stunned this long
+  fallStunSeconds: 3,              // falling into a gap (the only place he can fall): stunned this long
   fallSpill: 0.25,                 // and this share of the bag spills (rounded to whole pieces). Falls never kill.
   pitDepth: 0.9,                   // tiles: how deep a gap's pit is
 
