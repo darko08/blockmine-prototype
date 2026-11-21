@@ -9,7 +9,7 @@
     const t = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = String(t % 60).padStart(2, '0');
     return h ? h + ':' + String(m).padStart(2, '0') + ':' + s : m + ':' + s;
   };
-  const Z = { sky: 0, rock: 1, tunnel: 2, ladder: 3, ore: 4, oreGlow: 5, crack: 6, bag: 7, miner: 8, lamp: 9, light: 10, sparks: 11, fog: 20, glimmer: 21, hatch: 22, label: 23, fx: 24 };
+  const Z = { sky: 0, rock: 1, tunnel: 2, ladder: 3, ore: 4, oreGlow: 5, crack: 6, bag: 7, miner: 8, lamp: 9, light: 10, sparks: 11, fog: 20, glimmer: 21, hatch: 3.5, label: 23, fx: 24 };
   const FONT = '"Cormorant Garamond", Georgia, serif';
 
   const records = Records(TEST, 'cutaway');
@@ -74,33 +74,64 @@
       this.mineObjs.forEach((o) => o.destroy()); this.mineObjs = [];
       const keep = (o) => { this.mineObjs.push(o); return o; };
       const m = this.mine, G = m.G, W = S.cols * T, side = 30 * T, last = S.levels - 1;
+      const k = 0.5;   // world units per texture pixel for the rock and tunnel paintings
       const tile = (x, y, w, h, key, depth) => {
-        const t = keep(this.add.tileSprite(x, y, w, h, key).setOrigin(0, 0).setDepth(depth));
-        t.tilePositionX = x; t.tilePositionY = y;
+        const t = keep(this.add.tileSprite(x, y, w, h, key).setOrigin(0, 0).setDepth(depth).setTileScale(k));
+        t.tilePositionX = x / k; t.tilePositionY = y / k;
         return t;
       };
-      // the sky above the hatch, then four bands of rock, one per zone
-      tile(-side, -2000, W + 2 * side, 2000, 'sky', Z.sky);
+      const img = (x, y, key, depth) => keep(this.add.image(x, y, key).setDepth(depth));
+      // the night above the hatch: a painted backdrop standing on the ground line
+      keep(this.add.graphics().setDepth(Z.sky)).fillStyle(0x07080b, 1).fillRect(-side, -3000, W + 2 * side, 3000);
+      const sky = img(W / 2, 0, 'surface', Z.sky + 0.1).setOrigin(0.5, S.surfaceGround);
+      sky.setScale(S.surfaceWidth / sky.width);
+      // four bands of rock, one per zone
       for (let z = 0; z < 4; z++) {
         const y0 = z === 0 ? 0 : G.floorY(z * S.zoneLevels - 1), y1 = z === 3 ? G.floorY(last) + 30 * T : G.floorY(z * S.zoneLevels + S.zoneLevels - 1);
-        tile(-side, y0, W + 2 * side, y1 - y0, 'rock' + z, Z.rock);
+        tile(-side, y0, W + 2 * side, y1 - y0, 'rock' + z, Z.rock).setTint(S.rockTint);   // solid rock darker than the open tunnels
       }
-      const ground = keep(this.add.graphics().setDepth(Z.rock + 0.5));
-      ground.fillStyle(0x2a241d, 1).fillRect(-side, -6, W + 2 * side, 6);
-      // the tunnels, each with a timber floor
-      const floors = keep(this.add.graphics().setDepth(Z.tunnel + 0.5));
+      // the tunnels: back wall, a cap beam along the ceiling, a plank floor, posts with corner braces
+      const rnd = seededRandom(m.hash + '|props');
       m.levels.forEach((seg, l) => {
-        const z = G.zone(l), x = seg.a * T, w = (seg.b - seg.a + 1) * T;
-        tile(x, G.ceilY(l), w, S.tunnelHeight * T, 'tunnel' + z, Z.tunnel);
-        floors.fillStyle(0x5a4128, 1).fillRect(x, G.floorY(l), w, 5);
-        floors.fillStyle(0x3b2b1b, 1).fillRect(x - 3, G.ceilY(l), 4, S.tunnelHeight * T).fillRect(x + w - 1, G.ceilY(l), 4, S.tunnelHeight * T);
+        const z = G.zone(l), x = seg.a * T, w = (seg.b - seg.a + 1) * T, fy = G.floorY(l), cy = G.ceilY(l);
+        tile(x, cy, w, S.tunnelHeight * T, 'tunnel' + z, Z.tunnel);
+        const beam = keep(this.add.tileSprite(x, cy - 2, w, S.beamHeight, 'beamCap').setOrigin(0, 0).setDepth(Z.tunnel + 0.4));
+        beam.setTileScale(S.beamHeight / this.textures.get('beamCap').getSourceImage().height);
+        const floor = keep(this.add.tileSprite(x, fy - 4, w, S.floorHeight, 'floor').setOrigin(0, 0).setDepth(Z.tunnel + 0.6));
+        floor.setTileScale(S.floorHeight / this.textures.get('floor').getSourceImage().height);
+        const ladderCols = m.ladders.filter((d) => d.top === l || d.bottom === l).map((d) => G.colX(d.c));
+        const clear = (px, gap) => ladderCols.every((lx) => Math.abs(lx - px) > gap);
+        const posts = [];
+        for (let px = x + S.postWidth / 2; px <= x + w - S.postWidth / 2 + 0.1; px += S.postEvery * T) posts.push(px);
+        if (posts[posts.length - 1] < x + w - S.postWidth) posts.push(x + w - S.postWidth / 2);
+        posts.forEach((px, n) => {
+          if (!clear(px, T * 0.7)) return;
+          const post = img(px, fy, 'post', Z.tunnel + 0.5).setOrigin(0.5, 1);
+          post.setDisplaySize(S.postWidth, fy - cy);
+          // corner braces, pointing into the tunnel
+          for (const dir of [-1, 1]) {
+            if ((dir < 0 && n === 0) || (dir > 0 && n === posts.length - 1) || !clear(px + dir * S.braceSize * 0.6, T * 0.6)) continue;
+            if ((n + (dir > 0 ? 0 : 1)) % 2) continue;
+            const b = img(px, cy + S.beamHeight - 3, 'brace', Z.tunnel + 0.45).setOrigin(0, 0).setFlipX(dir < 0);
+            if (dir < 0) b.setOrigin(1, 0);
+            b.setDisplaySize(S.braceSize, S.braceSize * b.height / b.width);
+          }
+        });
+        // a few things lying about, placed by the block hash
+        const nProps = S.propsPerLevel[0] + Math.floor(rnd() * (S.propsPerLevel[1] - S.propsPerLevel[0] + 1));
+        for (let i = 0; i < nProps; i++) {
+          const kind = Math.floor(rnd() * S.art.props.length), px = x + T + rnd() * (w - 2 * T);
+          if (!clear(px, T * 1.2)) continue;
+          const pr = img(px, fy - 2, 'props' + kind, Z.tunnel + 0.55).setOrigin(0.5, 1).setFlipX(rnd() < 0.5);
+          pr.setScale(S.propHeight[kind] / pr.height);
+        }
       });
       // ladders, each in its own hole through the rock
       m.ladders.forEach((d) => {
-        const x = d.c * T, y0 = G.floorY(d.top), y1 = G.floorY(d.bottom);
-        tile(x, y0, T, G.ceilY(d.bottom) - y0, 'tunnel' + G.zone(Math.max(0, d.top)), Z.tunnel);
-        const lad = keep(this.add.tileSprite(x, y0 - (d.top < 0 ? 0 : T * 0.6), T, y1 - y0 + (d.top < 0 ? 0 : T * 0.6), 'ladder').setOrigin(0, 0).setDepth(Z.ladder));
-        lad.tilePositionY = 0;
+        const lx = G.colX(d.c), y0 = G.floorY(d.top), y1 = G.floorY(d.bottom), up = d.top < 0 ? 0 : T * 0.6;
+        tile(d.c * T, y0, T, G.ceilY(d.bottom) - y0, 'tunnel' + G.zone(Math.max(0, d.top)), Z.tunnel);
+        const lad = keep(this.add.tileSprite(lx, y0 - up, S.ladderWidth, y1 - y0 + up, 'ladder').setOrigin(0.5, 0).setDepth(Z.ladder));
+        lad.setTileScale(S.ladderWidth / this.textures.get('ladder').getSourceImage().width);
       });
       // level numbers down the left edge
       for (let l = 0; l < S.levels; l++) {
@@ -109,8 +140,9 @@
       }
       ['I', 'II', 'III', 'IV'].forEach((name, z) => keep(this.add.text(W + 10, G.floorY(z * S.zoneLevels) - S.tunnelHeight * T - 4, 'zone ' + name,
         { fontFamily: FONT, fontSize: '18px', color: '#b08d57', stroke: '#000', strokeThickness: 3 }).setOrigin(0, 1).setDepth(Z.label).setAlpha(0.8)));
-      this.hatchImg = keep(this.add.image(G.colX(m.c0), 0, this.hatch === 'open' ? 'hatchOpen' : 'hatchShut').setOrigin(0.5, 0.8).setDepth(Z.hatch));
-      this.hatchImg.setScale((3 * T) / this.hatchImg.width);
+      // the headframe over the shaft; its hatch is open or shut
+      this.hatchImg = keep(this.add.image(G.colX(m.c0), 4, this.hatch === 'open' ? 'hatchOpen' : 'hatchShut').setOrigin(0.5, 1).setDepth(Z.hatch));
+      this.hatchImg.setScale(S.hatchWidth / this.hatchImg.width);
       // the fog: one pixel per fog cell, stretched smoothly over the mine; plus a memory of the cells you have seen
       const f = this.fog = { x0: -4 * T, y0: 0, cols: Math.ceil((W + 8 * T) / S.fogCell), rows: Math.ceil((G.floorY(last) + 4 * T) / S.fogCell) };
       f.seen = new Uint8Array(f.cols * f.rows);
@@ -125,7 +157,7 @@
     buildMiner() {
       this.bagImg = this.add.image(0, 0, 'bagEmpty').setOrigin(0.5, 0).setDepth(Z.bag);
       this.minerImg = this.add.image(0, 0, 'minerWalk').setOrigin(0.5, 1).setDepth(Z.miner);
-      this.lampImg = this.add.image(0, 0, 'lampLit').setOrigin(0.5, 0).setDepth(Z.lamp);
+      this.lampImg = this.add.image(0, 0, 'lampOut').setDepth(Z.lamp).setVisible(false);   // covers his lantern once the oil is gone
       this.warm = this.add.image(0, 0, 'glow').setDepth(Z.light).setTint(0xff9a30).setBlendMode('ADD');
       this.bagGlow = this.add.image(0, 0, 'glow').setDepth(Z.glimmer).setTint(0xffb547).setBlendMode('ADD').setAlpha(0);
     }
@@ -195,7 +227,7 @@
     showNode(n) {
       n.img = this.add.image(n.x, n.y, n.rich ? 'oreRich' : 'ore' + n.zone).setDepth(Z.ore)
         .setRotation(n.kind === 'ceil' ? Math.PI : -n.side * Math.PI / 2);   // grows out of the ceiling or the end wall
-      n.size = (n.r * 3) / n.img.width; n.img.setScale(n.size);
+      n.size = (n.r * 3.4) / n.img.width; n.img.setScale(n.size);
       n.glow = this.add.image(n.x, n.y, 'glow').setDepth(Z.oreGlow).setTint(n.rich ? 0xfff0b0 : 0xff8a30).setBlendMode('ADD').setDisplaySize(n.r * 7, n.r * 7);
       const glimmers = n.rich || n.zone >= S.glimmerFromZone;
       n.glim = glimmers ? this.add.image(n.x, n.y, 'glow').setDepth(Z.glimmer).setTint(n.rich ? 0xfff0b0 : 0xff7a20).setBlendMode('ADD').setDisplaySize(n.r * 3.2, n.r * 3.2) : null;
@@ -226,7 +258,7 @@
     // ---------- where the miner is ----------
     toSurface() {
       const m = this.mine;
-      this.loc = { kind: 'level', l: -1, x: m.G.colX(m.c0) - 1.6 * T };
+      this.loc = { kind: 'level', l: -1, x: m.G.colX(m.c0) - S.waitOffset * T };
       const p = MineGen.point(m, this.loc); this.mx = p.x; this.my = p.y;
       this.steps = []; this.ctx = null; this.mining = null; this.pending = null;
     }
@@ -238,7 +270,16 @@
     factor() { return 1 - (1 - S.fullBagSpeedFactor) * Math.min(1, this.bagWeight() / S.bagCapacity); }
     speeds() { const f = this.factor(); return { walk: S.walkSpeed * f, up: S.ladderUpSpeed * f, down: S.ladderDownSpeed * f }; }
     hatchLoc() { return { kind: 'level', l: -1, x: this.mine.G.colX(this.mine.c0) }; }
-    lamp() { return { x: this.mx + 7 * this.facing, y: this.my - S.minerHeight * 0.45 }; }
+    poseKey() {
+      const climbing = (this.ctx && this.ctx.kind === 'ladder') || (!this.steps.length && this.loc && this.loc.kind === 'ladder');
+      return this.mining ? 'minerMine' : climbing ? 'minerClimb' : 'minerWalk';
+    }
+    // the lantern painted in his hand or on his belt is the one lamp: the light comes from there
+    lamp() {
+      const key = this.poseKey(), P = S.pose[key], tex = this.textures.get(key).getSourceImage();
+      const w = S.minerHeight * tex.width / tex.height;
+      return { x: this.mx + (P.lantern.x - P.bodyX) * w * this.facing, y: this.my - (1 - P.lantern.y) * S.minerHeight, h: P.lantern.h * S.minerHeight };
+    }
     lampOn() { return this.oil > 0; }
     lit(n) { const L = this.lamp(); return this.lampOn() && Math.hypot(n.x - L.x, n.y - L.y) <= S.lightRadius * T; }
 
@@ -391,20 +432,19 @@
 
     draw() {
       const lit = this.lampOn(), moving = this.steps.length > 0, onLadder = this.ctx && this.ctx.kind === 'ladder';
-      const loc = this.loc;
-      const climbing = onLadder || (!moving && loc && loc.kind === 'ladder');
-      const key = this.mining ? 'minerMine' : climbing ? 'minerClimb' : 'minerWalk';
-      const bob = moving && !climbing ? Math.abs(Math.sin(this.walkT * 9)) * 2 : 0;
-      this.minerImg.setTexture(key).setScale(S.minerHeight / this.minerImg.height).setFlipX(this.facing < 0).setPosition(this.mx, this.my - bob);
-      const L = this.lamp();
-      this.lampImg.setTexture(lit ? 'lampLit' : 'lampOut').setScale(12 / this.lampImg.width).setPosition(L.x, L.y - 6);
-      // the bag at his hip: a quarter of his height empty, half full
+      const key = this.poseKey(), climbing = key === 'minerClimb', P = S.pose[key];
+      const bob = moving && !climbing ? Math.abs(Math.sin(this.walkT * 9)) * 1.5 : 0;
+      this.minerImg.setTexture(key).setScale(S.minerHeight / this.minerImg.height).setFlipX(this.facing < 0)
+        .setOrigin(this.facing < 0 ? 1 - P.bodyX : P.bodyX, 1).setPosition(this.mx, this.my - bob);
+      const L = this.lamp(); L.y -= bob;
+      this.lampImg.setVisible(!lit).setPosition(L.x, L.y).setScale((L.h * 1.25) / this.lampImg.height);
+      // the bag on his back: a quarter of his height empty, half full
       const fill = Math.min(1, this.bagWeight() / S.bagCapacity), hasOre = this.bag.length > 0;
-      const bh = S.bagHeight[0] + (S.bagHeight[1] - S.bagHeight[0]) * fill;
-      const bx = this.mx - 9 * this.facing, by = this.my - S.minerHeight * 0.5;
-      this.bagImg.setTexture(!hasOre ? 'bagEmpty' : fill < 0.6 ? 'bagHalf' : 'bagFull').setPosition(bx, by);
-      this.bagImg.setScale(bh / this.bagImg.height).setRotation(Math.sin(this.clock * 2) * 0.05 * (1 - fill));
-      this.warm.setVisible(lit).setPosition(L.x, L.y).setDisplaySize(S.lightRadius * T * 2.2, S.lightRadius * T * 2.2).setAlpha(0.2 + 0.02 * Math.sin(this.clock * 9));
+      const bh = S.bagHeight[0] + (S.bagHeight[1] - S.bagHeight[0]) * fill, bagKey = !hasOre ? 'bagEmpty' : fill < 0.6 ? 'bagHalf' : 'bagFull';
+      const bx = this.mx - this.facing * S.backX * this.minerImg.displayWidth, by = this.my - S.minerHeight * (1 - S.backY) - bob;
+      this.bagImg.setTexture(bagKey).setFlipX(this.facing < 0).setOrigin(this.facing < 0 ? 1 - S.bagStrapX[bagKey] : S.bagStrapX[bagKey], 0).setPosition(bx, by);
+      this.bagImg.setScale(bh / this.bagImg.height).setRotation(Math.sin(this.clock * 2) * 0.04 * (1 - fill));
+      this.warm.setVisible(lit).setPosition(L.x, L.y).setDisplaySize(S.lightRadius * T * 2.2, S.lightRadius * T * 2.2).setAlpha(S.lampWarmth + 0.02 * Math.sin(this.clock * 9));
       this.hatchImg.setTexture(this.hatch === 'open' ? 'hatchOpen' : 'hatchShut');
 
       // ore: lit glow, deep glimmer through the dark, the crack only on the node you chose
@@ -456,7 +496,7 @@
         Sound.unlock();
         if (!this.mine || this.overlay || this.paused) return;
         this.mining = null; this.pending = null;
-        this.goTo({ kind: 'level', l: -1, x: this.mine.G.colX(this.mine.c0) - 1.6 * T });
+        this.goTo({ kind: 'level', l: -1, x: this.mine.G.colX(this.mine.c0) - S.waitOffset * T });
       };
       $('recBtn').onclick = () => {
         const r = records.get();
@@ -485,15 +525,15 @@
     hud() {
       this.set('oil', String(Math.ceil(this.oil)));
       const w = this.bagWeight();
-      this.set('bag', String(this.bagValue()));
-      this.set('bagLabel', 'Bag ' + (+w.toFixed(1)) + '/' + S.bagCapacity + (w >= S.bagCapacity ? ' · full' : ''));
+      this.set('bagW', (+w.toFixed(1)) + '/' + S.bagCapacity);
+      this.set('bag', this.bagValue() + ' points' + (w >= S.bagCapacity ? ' · full' : ''));
       const mean = TEST ? S.testBlockSeconds : S.averageBlockSeconds, secs = this.climbOutSeconds();
       const pct = secs > 0 ? (1 - Math.exp(-secs / mean)) * 100 : 0;
       this.risk = pct;
       this.set('riskNum', (pct > 0 && pct < 1 ? pct.toFixed(1) : Math.round(pct)) + '%');
       this.set('msg', performance.now() < this.msgUntil ? this.msg : '');
       const bi = this.blockInfo;
-      this.set('blockNum', bi ? 'Block ' + bi.height.toLocaleString() : 'Block');
+      this.set('blockNum', bi ? bi.height.toLocaleString() : '–');
       this.set('blockOpen', bi ? mmss(Date.now() - bi.arrivedAt) : '–:––');
       this.set('prevOpen', bi && bi.prevOpenMs != null ? 'previous block open ' + mmss(bi.prevOpenMs) : 'previous block open —');
     }

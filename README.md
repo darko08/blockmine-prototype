@@ -27,5 +27,5 @@ A single-player practice mine timed by the real Bitcoin chain. One web page, Pha
 - `cutaway/settings.js` — every speed, cost and rate for the cutaway mine. `settings.js` — the same for the rope version.
 - `cutaway/mine.js` — the mine from the block hash, and the walking routes. `cutaway/game.js` — the cutaway game.
 - `js/` — rope game, chain feed, seeded randomness, sounds, records (shared).
-- `Assets/cutaway/` — placeholder art for the cutaway mine (`python tools/make_placeholders.py`). Replace any file to swap it, then bump `artVersion` in `cutaway/settings.js`.
+- `Assets/cutaway/` — painted art for the cutaway mine, cut by `python tools/cut_cutaway.py` from the Runway sheets in `Assets/sheets/cutaway/` (the originals are large and kept out of git; the prompts are in `ART_BRIEF.md`). Replace any file to swap it, then bump `artVersion` in `cutaway/settings.js`.
 - `Assets/` — painted pieces for the rope version, cut from the sheets in `Assets/sheets/` by `python tools/cut_sheets.py`.
