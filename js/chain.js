@@ -1,24 +1,32 @@
 // The timer: real Bitcoin blocks from mempool.space, or simulated ones in test mode.
-// onBlock({hash, height, initial, missed})  onStatus('live' | 'lost' | 'connecting')
+// onBlock({hash, height, initial, missed, arrivedAt, prevOpenMs})
+// arrivedAt: ms timestamp the block arrived; prevOpenMs: how long the block before it stayed open (null if unknown)  onStatus('live' | 'lost' | 'connecting')
 (function () {
   const S = window.SETTINGS;
 
   function LiveChain(onBlock, onStatus) {
-    let ws = null, height = -1, lastMsg = 0, status = '', retry = null;
+    let ws = null, height = -1, lastMsg = 0, status = '', retry = null, lastArrival = null;
     const set = (s) => { if (s !== status) { status = s; onStatus(s); } };
 
+    // the latest blocks with their timestamps (the block's own clock, set by whoever mined it)
     async function tip() {
-      const [h, hash] = await Promise.all([
-        fetch(S.mempoolApi + '/blocks/tip/height', { cache: 'no-store' }).then((r) => { if (!r.ok) throw 0; return r.text(); }),
-        fetch(S.mempoolApi + '/blocks/tip/hash', { cache: 'no-store' }).then((r) => { if (!r.ok) throw 0; return r.text(); }),
-      ]);
-      return { height: parseInt(h, 10), hash: hash.trim() };
+      const r = await fetch(S.mempoolApi + '/blocks', { cache: 'no-store' });
+      if (!r.ok) throw 0;
+      const list = (await r.json()).sort((a, b) => b.height - a.height);
+      const top = list[0], prev = list[1];
+      return { height: top.height, hash: top.id, timestamp: top.timestamp, prevTimestamp: prev && prev.height === top.height - 1 ? prev.timestamp : null };
     }
-    function take(b, missed) {
+    // live: arrival = the moment the feed delivered it. Fetched on (re)connect: the block's timestamp.
+    function take(b, missed, live) {
       if (!b || !b.hash || !(b.height > height)) return;
-      const initial = height < 0;
-      height = b.height;
-      onBlock({ hash: b.hash, height: b.height, initial, missed: !initial && missed });
+      const initial = height < 0, now = Date.now();
+      const stamped = b.timestamp ? Math.min(now, b.timestamp * 1000) : now;
+      const arrivedAt = live ? now : stamped;
+      let prevOpenMs = null;
+      if (live && lastArrival && b.height === height + 1) prevOpenMs = arrivedAt - lastArrival;
+      else if (b.timestamp && b.prevTimestamp) prevOpenMs = Math.max(0, (b.timestamp - b.prevTimestamp) * 1000);
+      height = b.height; lastArrival = arrivedAt;
+      onBlock({ hash: b.hash, height: b.height, initial, missed: !initial && missed, arrivedAt, prevOpenMs });
     }
     async function connect() {
       clearTimeout(retry);
@@ -37,10 +45,13 @@
         lastMsg = Date.now();
         if (status !== 'live') set('live');
         let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
-        if (d.block) take({ hash: d.block.id, height: d.block.height }, false);
+        if (d.block) {
+          const b = d.block;
+          take({ hash: b.id, height: b.height, timestamp: b.timestamp, prevTimestamp: null }, false, true);
+        }
         if (Array.isArray(d.blocks) && d.blocks.length) {
-          const top = d.blocks.reduce((a, b) => (b.height > a.height ? b : a));
-          take({ hash: top.id, height: top.height }, true);
+          const sorted = d.blocks.slice().sort((a, b) => b.height - a.height), top = sorted[0], prev = sorted[1];
+          take({ hash: top.id, height: top.height, timestamp: top.timestamp, prevTimestamp: prev && prev.height === top.height - 1 ? prev.timestamp : null }, true, false);
         }
       };
       ws.onclose = ws.onerror = () => lose();
@@ -59,14 +70,18 @@
   }
 
   function TestChain(onBlock, onStatus) {
-    let height = 900000;
+    let height = 900000, last = Date.now();
     onStatus('live');
     function next() {
       // same randomness as the real chain: arrivals are exponential (memoryless), here with a 1-minute mean
       const wait = -Math.log(1 - Math.random()) * S.testBlockSeconds * 1000;
-      setTimeout(() => { onBlock({ hash: randomHash(), height: ++height, initial: false, missed: false }); next(); }, wait);
+      setTimeout(() => {
+        const now = Date.now(), prevOpenMs = now - last; last = now;
+        onBlock({ hash: randomHash(), height: ++height, initial: false, missed: false, arrivedAt: now, prevOpenMs });
+        next();
+      }, wait);
     }
-    onBlock({ hash: randomHash(), height, initial: true, missed: false });
+    onBlock({ hash: randomHash(), height, initial: true, missed: false, arrivedAt: last, prevOpenMs: null });
     next();
   }
 

@@ -5,6 +5,10 @@
   const DEPTH = S.levels * S.levelHeight;
   const AMBER = 0xffb547, $ = (id) => document.getElementById(id);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const mmss = (ms) => {
+    const t = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = String(t % 60).padStart(2, '0');
+    return h ? h + ':' + String(m).padStart(2, '0') + ':' + s : m + ':' + s;
+  };
   const Z = { back: 0, beam: 1, wall: 2, ore: 3, crack: 4, hatch: 5, bag: 6, miner: 7, lamp: 8, light: 9, sparks: 10, dark: 20, glow: 21, fx: 22 };
 
   const records = Records(TEST);
@@ -26,9 +30,10 @@
       this.bag = []; this.oil = S.oilStart; this.inShift = false;
       this.hatch = 'waiting'; this.paused = false; this.overlay = false;
       this.nodes = []; this.mine = null; this.holds = new Set(); this.drag = null;
-      this.shutTimer = null; this.msgUntil = 0; this.clock = 0;
+      this.shutTimer = null; this.msgUntil = 0; this.clock = 0; this.jolt = 0;
+      this.blockInfo = null;
 
-      this.buildShaft();
+      this.crackG = this.add.graphics().setDepth(Z.crack);
       this.buildMiner();
       this.buildLight();
       this.buildFx();
@@ -47,41 +52,56 @@
     }
 
     // ---------- building the scene ----------
-    buildShaft() {
-      const hw = S.shaftHalfWidth, far = 800, split = 2 * S.levelHeight, bottom = DEPTH + 400;
+    // the shaft is rebuilt whenever the screen changes shape: it fills shaftScreenFraction of the width, rock fills the rest
+    buildShaft(hw) {
+      if (this.shaftObjs) this.shaftObjs.forEach((o) => o.destroy());
+      const objs = this.shaftObjs = [], keep = (o) => { objs.push(o); return o; };
+      const far = 3000, top = -1500, split = 2 * S.levelHeight, bottom = DEPTH + 600;
       const tile = (x, y, w, h, key, tint) => {
-        const t = this.add.tileSprite(x, y, w, h, key).setOrigin(0, 0).setTileScale(S.wallTextureScale);
+        const t = keep(this.add.tileSprite(x, y, w, h, key).setOrigin(0, 0).setTileScale(S.wallTextureScale));
         t.tilePositionX = x / S.wallTextureScale; t.tilePositionY = y / S.wallTextureScale;
         if (tint) t.setTint(tint);
         return t;
       };
-      // back wall of the shaft (darker), then the side walls and floor
-      tile(-hw, 0, 2 * hw, split, 'wall', 0x77716a).setDepth(Z.back);
+      // back wall of the shaft (darker); the side walls: upper rock near the top, deep rock lower down; the floor
+      tile(-hw, top, 2 * hw, split - top, 'wall', 0x77716a).setDepth(Z.back);
       tile(-hw, split, 2 * hw, bottom - split, 'deep', 0x8a7f76).setDepth(Z.back);
       for (const x of [-hw - far, hw]) {
-        tile(x, 0, far, split, 'wall').setDepth(Z.wall);
+        tile(x, top, far, split - top, 'wall').setDepth(Z.wall);
         tile(x, split, far, bottom - split, 'deep').setDepth(Z.wall);
       }
-      tile(-hw, DEPTH, 2 * hw, 400, 'deep').setDepth(Z.wall);
-      // timber sets: a cross beam at every level line, posts down both walls, a brace here and there
-      const beamH = (y) => { const b = this.add.image(0, y, 'beamH').setDepth(Z.beam); b.setScale((2 * hw + 50) / b.width); return b; };
-      beamH(0).setDepth(Z.hatch - 0.5);
-      for (let l = 1; l < S.levels; l++) beamH(l * S.levelHeight);
-      const postH = 250;
-      for (let y = 0; y < DEPTH; y += postH) for (const side of [-1, 1]) {
-        const p = this.add.image(side * (hw - 6), y, 'beamV').setOrigin(0.5, 0).setDepth(Z.beam + 0.2);
-        p.setScale(postH / p.height); if (side > 0) p.setFlipX(true);
-      }
+      tile(-hw, DEPTH, 2 * hw, bottom - DEPTH, 'deep').setDepth(Z.wall);
+      // timber sets: a cross beam at every level line, its ends tucked under the posts down both edges
+      const beamY = (l) => l * S.levelHeight;
       for (let l = 0; l < S.levels; l++) {
-        const side = l % 2 ? 1 : -1, d = this.add.image(side * (hw - 34), l * S.levelHeight + 70, 'beamD').setOrigin(0.5, 0).setDepth(Z.beam);
-        d.setScale(110 / d.height).setFlipX(side > 0).setAlpha(0.9);
-        this.add.text(-side * (hw - 18), l * S.levelHeight + 16, ['I', 'II', 'III', 'IV'][l] || String(l + 1),
-          { fontFamily: '"Cormorant Garamond", Georgia, serif', fontSize: '22px', color: '#b08d57' })
-          .setOrigin(side > 0 ? 0 : 1, 0).setDepth(Z.crack).setAlpha(0.55);
+        keep(this.add.image(0, beamY(l), 'beamH').setDisplaySize(2 * hw, S.beamThickness).setDepth(l === 0 ? Z.hatch - 0.5 : Z.beam));
       }
-      this.hatchImg = this.add.image(0, 26, 'hatchShut').setOrigin(0.5, 1).setDepth(Z.hatch);
-      this.hatchImg.setScale(215 / this.hatchImg.width);
-      this.crackG = this.add.graphics().setDepth(Z.crack);
+      const pw = S.postWidth;
+      for (const side of [-1, 1]) {
+        const p = keep(this.add.tileSprite(side * hw, -S.beamThickness, pw, DEPTH + S.beamThickness, 'beamV').setOrigin(0.5, 0).setDepth(Z.wall + 0.5));
+        p.setTileScale(pw / p.texture.getSourceImage().width); if (side > 0) p.setFlipX(true);
+        // a clean square cap where each beam meets the post
+        for (let l = 0; l < S.levels; l++) {
+          const c = keep(this.add.image(side * hw, beamY(l), 'beamV').setDisplaySize(pw + 6, S.beamThickness + 8).setDepth(Z.wall + 0.6));
+          c.setTint(0xb8a890);
+        }
+      }
+      // level numbers on the back wall, clear of the posts and beams
+      for (let l = 0; l < S.levels; l++) {
+        const side = l % 2 ? 1 : -1;
+        keep(this.add.text(side * (hw - pw / 2 - 12), beamY(l) + S.beamThickness / 2 + 10, ['I', 'II', 'III', 'IV'][l] || String(l + 1),
+          { fontFamily: '"Cormorant Garamond", Georgia, serif', fontSize: '24px', color: '#b08d57' })
+          .setOrigin(side > 0 ? 1 : 0, 0).setDepth(Z.crack).setAlpha(0.6));
+      }
+      const key = this.hatchImg ? this.hatchImg.texture.key : 'hatchShut';
+      this.hatchImg = keep(this.add.image(0, 26, key).setOrigin(0.5, 1).setDepth(Z.hatch));
+      this.hatchImg.setScale(Math.min(2 * hw - pw - 20, 300) / this.hatchImg.width);
+    }
+
+    // ore sits in the rock wall just past the post; the lamp-reach rule uses reachDx, which doesn't depend on the screen
+    placeNode(n) {
+      n.x = n.side * (this.hw + S.postWidth / 2 + n.r * 0.85 + n.inset);
+      n.img.x = n.x; n.glow.x = n.x;
     }
 
     buildMiner() {
@@ -138,7 +158,10 @@
     fitCamera() {
       const cam = this.cameras.main, W = this.scale.width, H = this.scale.height;
       cam.setSize(W, H);
-      cam.setZoom(Math.min(W / S.viewWidth, H / S.viewHeightMin));
+      const zoom = Math.min(W / S.viewWidth, H / S.viewHeightMin);
+      cam.setZoom(zoom);
+      const hw = Math.round(clamp((W / zoom) * S.shaftScreenFraction / 2, S.shaftHalfWidthMin, S.shaftHalfWidthMax));
+      if (hw !== this.hw) { this.hw = hw; this.buildShaft(hw); this.nodes.forEach((n) => this.placeNode(n)); }
     }
 
     // ---------- the chain ----------
@@ -151,6 +174,7 @@
 
     onBlock(b) {
       clearTimeout(this.shutTimer);
+      this.blockInfo = { height: b.height, arrivedAt: b.arrivedAt || Date.now(), prevOpenMs: b.prevOpenMs };
       if (b.initial) { this.openMine(b, false); return; }
       if (b.missed) {
         // a block came while the feed was down: no catch; bring the miner up safely
@@ -181,17 +205,19 @@
     addNode(rng, level) {
       const r = S.oreRadius[level] * (0.8 + 0.4 * rng());
       for (let tries = 0; tries < 12; tries++) {
-        const side = rng() < 0.5 ? -1 : 1;
-        const x = side * (S.shaftHalfWidth - r * 0.5 - rng() * 22);
+        // same draws in the same order as before: the same block lays out the same mine under the same rules
+        const side = rng() < 0.5 ? -1 : 1, xr = rng();
+        const reachDx = S.reachHalfWidth - r * 0.5 - xr * 22;
         const y = level * S.levelHeight + 40 + rng() * (S.levelHeight - 80);
         const crack = rng() * Math.PI;
         const value = Math.max(1, Math.round(S.oreValue[level] * (0.7 + 0.6 * rng())));
         const tilt = (rng() - 0.5) * 0.6 - side * 0.5;
-        if (this.nodes.some((n) => Math.hypot(n.x - x, n.y - y) < n.r + r + 10)) continue;
-        const n = { id: this.mine.nextId++, x, y, r, crack, value, weight: S.oreWeight[level], level, hp: 1, flash: 0 };
-        n.img = this.add.image(x, y, 'crystal' + Math.min(level, 3)).setDepth(Z.ore).setRotation(tilt);
+        if (this.nodes.some((n) => Math.hypot(n.side * n.reachDx - side * reachDx, n.y - y) < n.r + r + 10)) continue;
+        const n = { id: this.mine.nextId++, side, reachDx, inset: xr * 14, y, r, crack, value, weight: S.oreWeight[level], level, hp: 1, flash: 0 };
+        n.img = this.add.image(0, y, 'crystal' + Math.min(level, 3)).setDepth(Z.ore).setRotation(tilt).setTint(S.oreTint);
         n.size = (r * 4.2) / n.img.width; n.img.setScale(n.size);
-        n.glow = this.add.image(x, y, 'glow').setDepth(Z.glow).setTint(AMBER).setBlendMode('ADD').setDisplaySize(r * 5, r * 5);
+        n.glow = this.add.image(0, y, 'glow').setDepth(Z.glow).setTint(S.oreTint).setBlendMode('ADD').setDisplaySize(r * 5, r * 5);
+        this.placeNode(n);
         this.nodes.push(n);
         return;
       }
@@ -228,7 +254,7 @@
     // ---------- input ----------
     world(p) { return this.cameras.main.getWorldPoint(p.x, p.y); }
     lampOn() { return this.oil > 0; }
-    inReach(n) { return Math.hypot(n.x, n.y - this.minerY) <= S.lampReach; }
+    inReach(n) { return Math.hypot(n.reachDx, n.y - this.minerY) <= S.lampReach; }
 
     down(p) {
       Sound.unlock();
@@ -274,8 +300,8 @@
       n.hp -= 1 / swingsNeeded; n.flash = 0.12;
       Sound.tick();
       this.sparks.explode(t >= 1 ? 18 : 8, n.x, n.y);
-      const arm = this.poseA, dir = this.pose.flip ? -1 : 1;
-      this.tweens.add({ targets: arm, rotation: 0.16 * dir, duration: 70, yoyo: true, ease: 'Quad.easeOut' });
+      // a small jolt toward the rock; he stays on the rope
+      this.tweens.add({ targets: this, jolt: 5 * n.side, duration: 70, yoyo: true, ease: 'Quad.easeOut' });
       this.float(n.x, n.y - n.r - 8, t >= 1 ? 'clean' : t > 0.5 ? 'rough' : 'sloppy');
       if (n.hp <= 1e-9) {
         this.sparks.explode(26, n.x, n.y);
@@ -323,7 +349,8 @@
         }
       }
       for (const n of this.nodes) n.flash = Math.max(0, n.flash - dt);
-      const targetX = this.mining ? Math.sign(this.mining.x) * 34 : 0;
+      // at a node he swings over on the rope until the pick reaches the wall
+      const targetX = this.mining ? this.mining.side * Math.max(0, this.hw - 68) : 0;
       this.minerX += (targetX - this.minerX) * Math.min(1, dt * 8);
       const cam = this.cameras.main;
       cam.centerOn(0, this.minerY + (cam.height / cam.zoom) * S.cameraLead);
@@ -337,7 +364,7 @@
     }
 
     draw() {
-      const x = this.minerX, y = this.minerY, lit = this.lampOn();
+      const x = this.minerX + this.jolt, y = this.minerY, lit = this.lampOn();
       this.hatchImg.setTexture(this.hatch === 'open' ? 'hatchOpen' : 'hatchShut');
 
       // the miner: 3 painted poses, sliding between them
@@ -354,17 +381,17 @@
       this.flame.setVisible(lit).setPosition(this.lampX, this.lampY + S.lampHeight * 0.62)
         .setAlpha(0.55 + 0.15 * Math.sin(this.clock * 11) + 0.08 * Math.sin(this.clock * 23));
 
-      // rope from the headframe, and the bag swelling on its own rope, pulled taut by weight
+      // the rope from the headframe to his hands
       const g = this.ropeG; g.clear();
-      g.lineStyle(2.2, 0x6b5638, 1); g.lineBetween(x, -900, x, top + 4);
+      g.lineStyle(2.2, 0x6b5638, 1); g.lineBetween(x, -1500, x, top + 4);
+      // the bag hangs from his belt, on the side away from the lamp; it swells and drags as it fills
       const fill = Math.min(1, this.bagWeight() / S.bagCapacity), hasOre = this.bag.length > 0;
       const bagKey = !hasOre ? 'bagEmpty' : fill < 0.6 ? 'bagHalf' : 'bagFull';
-      const ropeLen = S.bagRope[0] + (S.bagRope[1] - S.bagRope[0]) * fill;
-      const sway = Math.sin(this.clock * 2.1) * 6 * (1 - fill);
-      const hx = x - 10 * facing, hy = y + 18, bx = hx - 16 * facing + sway, by = hy + ropeLen;
-      g.lineStyle(1.6, 0x8a7350, 1); g.lineBetween(hx, hy, bx, by);
       const bh = S.bagHeight[0] + (S.bagHeight[1] - S.bagHeight[0]) * fill;
-      this.bagImg.setVisible(true).setTexture(bagKey).setOrigin(S.ropeX[bagKey], 0).setPosition(bx, by - 4);
+      const sway = Math.sin(this.clock * 2.1) * 0.08 * (1 - fill);
+      const bx = x - 12 * facing, by = top + S.minerHeight * S.beltY;
+      g.lineStyle(2, 0x8a7350, 1); g.lineBetween(x - 4 * facing, by - 2, bx, by + 4);
+      this.bagImg.setVisible(true).setTexture(bagKey).setOrigin(S.ropeX[bagKey], 0).setPosition(bx, by).setRotation(sway);
       this.bagImg.setScale(bh / this.bagImg.height);
 
       // ore and cracks
@@ -372,13 +399,13 @@
       for (const n of this.nodes) {
         const s = n.size * (0.6 + 0.4 * n.hp) * (n.flash > 0 ? 1.08 : 1);
         n.img.setScale(s);
-        if (n.flash > 0) n.img.setTintFill(0xfff1c8); else n.img.clearTint();
+        if (n.flash > 0) n.img.setTintFill(0xfff1c8); else n.img.setTint(S.oreTint);
         n.glow.setAlpha(S.oreGlowInDark * (0.55 + 0.45 * n.hp) * (0.85 + 0.15 * Math.sin(this.clock * 1.7 + n.id)));
-        const reach = lit && this.inReach(n);
+        if (n !== this.mining) continue;              // the crack shows only on the node you have chosen
         const cx = Math.cos(n.crack) * n.r * 1.35, cy = Math.sin(n.crack) * n.r * 1.35;
-        cg.lineStyle(3, 0x120a02, reach ? 0.85 : 0.45); cg.lineBetween(n.x - cx, n.y - cy, n.x + cx, n.y + cy);
-        cg.lineStyle(1, 0xfff0c0, reach ? 0.8 : 0.25); cg.lineBetween(n.x - cx, n.y - cy, n.x + cx, n.y + cy);
-        if (n === this.mining) { cg.lineStyle(1, 0xb08d57, 0.9); cg.strokeCircle(n.x, n.y, n.r * 1.7); }
+        cg.lineStyle(3, 0x120a02, 0.85); cg.lineBetween(n.x - cx, n.y - cy, n.x + cx, n.y + cy);
+        cg.lineStyle(1, 0xfff0c0, 0.8); cg.lineBetween(n.x - cx, n.y - cy, n.x + cx, n.y + cy);
+        cg.lineStyle(1, 0xb08d57, 0.9); cg.strokeCircle(n.x, n.y, n.r * 1.7);
       }
 
       // darkness over the whole shaft, a soft warm circle cut around the lamp
@@ -397,6 +424,7 @@
         if (x1 < R) dg.fillRect(x1, Math.max(T, y0), R - x1, Math.min(B, y1) - Math.max(T, y0));
       } else {
         this.darkImg.setVisible(false);
+        dg.fillStyle(0x000000, S.darknessLampOut);
         dg.fillRect(L, T, R - L, B - T);
       }
       // with the lamp out, the bag's ore still glows
@@ -444,6 +472,11 @@
       const pct = this.minerY > 0 ? (1 - Math.exp(-secs / mean)) * 100 : 0;
       this.set('riskNum', (pct > 0 && pct < 1 ? pct.toFixed(1) : Math.round(pct)) + '%');
       this.set('msg', performance.now() < this.msgUntil ? this.msg : '');
+      // the block clock: counts up from the moment the block arrived. Never a countdown.
+      const bi = this.blockInfo;
+      this.set('blockNum', bi ? 'Block ' + bi.height.toLocaleString() : 'Block');
+      this.set('blockOpen', bi ? mmss(Date.now() - bi.arrivedAt) : '–:––');
+      this.set('prevOpen', bi && bi.prevOpenMs != null ? 'previous block open ' + mmss(bi.prevOpenMs) : 'previous block open —');
     }
   }
 

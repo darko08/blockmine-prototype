@@ -13,8 +13,11 @@ window.SETTINGS = {
   // --- Shaft ---
   levels: 4,
   levelHeight: 500,
-  shaftHalfWidth: 180,
-  wallThickness: 80,
+  reachHalfWidth: 180,             // lamp reach is measured as if the ore sat this far from the rope (the rule, independent of screen)
+  shaftScreenFraction: 0.6,        // the shaft fills this share of the screen width; the rock walls the rest
+  shaftHalfWidthMin: 120, shaftHalfWidthMax: 420,
+  postWidth: 34,                   // timber posts down both edges of the shaft
+  beamThickness: 30,
   surfaceY: -70,                   // where the miner waits above the hatch
 
   // --- Movement (units per second) ---
@@ -25,7 +28,7 @@ window.SETTINGS = {
   // --- Lamp and oil ---
   oilStart: 100,
   oilBurnPerSecond: 0.5,           // burns only while below the hatch
-  lampReach: 215,                  // how far from the lamp you can press a node to stop there
+  lampReach: 215,                  // how far from the lamp you can press a node to stop there (see reachHalfWidth)
 
   // --- Ore ---
   nodesPerLevel: [5, 7, 9, 11],    // laid out from the block hash
@@ -45,6 +48,7 @@ window.SETTINGS = {
   sloppyAt: 0.45,                  // at or below this = sloppiest
   nodeTouchSlop: 2.4,              // press within radius x this counts as pressing the node
 
+  artVersion: 3,                   // bump after replacing art files so browsers fetch the new ones
   // --- Art (pass 2). Swap any piece by replacing its file; set a crystal entry to a file path to replace the drawn crystals.
   art: {
     wall: 'Assets/tex_wall.webp', deep: 'Assets/tex_deep.webp',
@@ -59,11 +63,13 @@ window.SETTINGS = {
   ropeX: { minerHang: 0.454, minerSwing: 0.077, minerClimb: 0.556, bagEmpty: 0.356, bagHalf: 0.336, bagFull: 0.384, lampLit: 0.5, lampOut: 0.5 },
   minerHeight: 150,       // world units
   lampHeight: 40,
-  bagHeight: [46, 76],    // empty -> full
-  bagRope: [26, 44],      // rope length empty -> full (the bag pulls it down)
+  bagHeight: [50, 135],   // hangs from his belt: about a third of his height empty, almost his height full
+  beltY: 0.47,            // where his belt is, as a fraction of his height from the top
+  oreTint: 0xd9781e,      // deep amber
   wallTextureScale: 0.55,
   lightRadius: 280,       // soft warm circle around the lamp (world units)
-  darkness: 0.96,         // how black the unlit shaft is
+  darkness: 0.55,         // how black the unlit rock is (the walls still show, dimly)
+  darknessLampOut: 0.97,  // with the lamp out
   oreGlowInDark: 0.32,    // ore glows faintly even in the dark
   poseFadeMs: 140,        // the miner slides between his 3 poses
 

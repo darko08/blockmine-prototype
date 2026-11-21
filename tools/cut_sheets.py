@@ -14,6 +14,9 @@ PLAN = {
   'sheet_hatch.png':  ['hatch_open', 'hatch_shut'],
   'sheet_timber.png': ['beam_horizontal', 'beam_vertical', 'beam_diagonal', 'rope'],
 }
+# painted details to remove after cutting, in the cut sprite's pixels: the hanging pose
+# came with a lantern in his hand, but the game draws its own lamp on his belt
+ERASE = {'miner_hang': [(0, 185, 29, 262)]}
 def solid(a, axis, thr=8):
     w, h = a.size; px = a.load()
     n = w if axis == 0 else h; m = h if axis == 0 else w
@@ -58,6 +61,8 @@ for sheet, names in PLAN.items():
         print(f'{sheet}: found {len(boxes)} pieces, expected {len(names)}: {boxes}'); continue
     for name, b in zip(names, boxes):
         s = img.crop(b); s.thumbnail((MAX, MAX), Image.LANCZOS)
+        for box in ERASE.get(name, []):
+            s.paste((0, 0, 0, 0), box)
         s.save(os.path.join(OUT, name + '.webp'), quality=86, method=6)
         print(name, s.size)
 for tex in ['tex_wall', 'tex_deep']:

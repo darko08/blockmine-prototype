@@ -4,11 +4,12 @@
 
   window.Art = {
     preload(scene) {
+      const v = (p) => p + (S.artVersion ? '?v=' + S.artVersion : '');
       for (const [key, path] of Object.entries(S.art)) {
         if (key === 'crystals') continue;
-        if (path) scene.load.image(key, path);
+        if (path) scene.load.image(key, v(path));
       }
-      (S.art.crystals || []).forEach((p, i) => scene.load.image('crystal' + i, p));
+      (S.art.crystals || []).forEach((p, i) => scene.load.image('crystal' + i, v(p)));
     },
 
     make(scene) {
@@ -54,8 +55,6 @@
             c.fillStyle = 'rgba(255,245,210,0.55)'; c.fillRect(-w * 0.15, -len * 0.95, w * 0.3, len * 0.8);
             c.restore();
           }
-          // rock seat
-          c.fillStyle = '#26231f'; c.beginPath(); c.ellipse(n / 2, n * 0.66, n * 0.3, n * 0.09, 0, 0, Math.PI * 2); c.fill();
         });
       }
     },
