@@ -273,6 +273,20 @@ class Game {
         if (t.kind === 'gap') {
           const pit = new THREE.Mesh(new THREE.BoxGeometry(t.x1 - t.x0, S.pitDepth * T, D * 0.98), fogged(new THREE.MeshStandardMaterial({ color: 0x050302, roughness: 1 })));
           pit.position.set((t.x0 + t.x1) / 2, -(fy + S.pitDepth * T / 2) + 0.6, 0); pit.userData.own = true; this.world.add(pit);
+          // so the hole reads in the dark: pale broken edges on both sides and a faint red glow far down
+          const rim = fogged(new THREE.MeshStandardMaterial({ color: 0x8c7f72, roughness: 0.95, flatShading: true })), r3 = seededRandom(m.hash + '|pit' + t.x0);
+          for (const x of [t.x0, t.x1]) for (let k = 0; k < 7; k++) {   // broken stones along both lips
+            const st = new THREE.Mesh(new THREE.DodecahedronGeometry(1.4 + r3() * 1.2, 0), rim);
+            st.position.set(x + (r3() - 0.5) * 3, -fy + 0.6, (k / 6 - 0.5) * D * 0.85); st.scale.set(1.3, 0.55, 1); st.rotation.set(r3() * 3, r3() * 3, r3() * 3);
+            st.castShadow = st.receiveShadow = true; st.userData.own = true; this.world.add(st);
+          }
+          if (!this.pitTex) {   // black at the lips, a dim ember glow from far down in the middle
+            const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+            const gr = x.createRadialGradient(32, 32, 2, 32, 32, 32); gr.addColorStop(0, '#6a1a06'); gr.addColorStop(0.55, '#260803'); gr.addColorStop(1, '#000000');
+            x.fillStyle = gr; x.fillRect(0, 0, 64, 64); this.pitTex = new THREE.CanvasTexture(c); this.pitTex.colorSpace = THREE.SRGBColorSpace;
+          }
+          const glow = new THREE.Mesh(new THREE.PlaneGeometry(t.x1 - t.x0, D * 0.98), fogged(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: this.pitTex, emissiveIntensity: 1 })));
+          glow.rotation.x = -Math.PI / 2; glow.position.set((t.x0 + t.x1) / 2, -fy + 0.7, 0); glow.userData.own = true; this.world.add(glow);
         } else {
           const r2 = seededRandom(m.hash + '|rubble' + t.x0), mat = fogged(new THREE.MeshStandardMaterial({ color: 0x6f655b, roughness: 0.9, flatShading: true }));
           // a heap of rocks as tall as the mound that blocks him, across the whole depth of the tunnel, so it reads as a
@@ -570,7 +584,10 @@ class Game {
     let best = -1, bd = Infinity;
     m.ladders.forEach((d, k) => {
       const dx = Math.abs(m.G.colX(d.c) - this.mx);
-      if ((d.top === this.lvl || d.bottom === this.lvl) && dx <= S.grabRange * T && dx < bd) { best = k; bd = dx; }
+      if (!(d.top === this.lvl || d.bottom === this.lvl) || dx > S.grabRange * T) return;
+      const goesDown = d.top === this.lvl, wantDown = !this.keys.up;
+      const score = dx - (goesDown === wantDown ? 0.5 * T : 0);   // two ladders at one spot: take the one going your way
+      if (score < bd) { best = k; bd = score; }
     });
     if (best >= 0) return { kind: 'ladder', k: best };
     const near = this.nodes.filter((n) => n.l === this.lvl && Math.abs(n.x - this.mx) <= (S.oreStandGap + S.mineRange) * T)
@@ -624,12 +641,17 @@ class Game {
       }
       const gap = this.terrainAt(this.lvl, this.mx, 'gap');
       if (gap) this.startFall('gap', 0, gap);
+      else if (this.moving && !(this.gapHintAt > performance.now())) {
+        const ahead = this.terrainAt(this.lvl, this.mx + this.facing * 1.6 * T, 'gap');
+        if (ahead) { this.say('A hole in the floor. Jump over it.', 2); this.gapHintAt = performance.now() + 4000; }
+      }
     } else if (this.mode === 'ladder') {
       const d = this.mine.ladders[this.ladderK], y0 = this.floorY(d.top), y1 = this.floorY(d.bottom);
       const v = up ? -S.climbSpeed * f : down ? S.slideSpeed * f : 0;
       this.my += v * dt; this.climbDist += Math.abs(v * dt); this.climbV = v;
-      if (v < 0 && this.my <= y0) this.stepOff(d, true, dir);
-      else if (v > 0 && this.my >= y1) this.stepOff(d, false, dir);
+      const onward = (lvl, down) => this.mine.ladders.findIndex((e) => e !== d && (down ? e.top : e.bottom) === lvl && Math.abs(e.c - d.c) < 0.5);
+      if (v < 0 && this.my <= y0) { const k = onward(d.top, false); if (k >= 0 && !dir) { this.ladderK = k; this.my = y0 - 0.01; } else this.stepOff(d, true, dir); }
+      else if (v > 0 && this.my >= y1) { const k = onward(d.bottom, true); if (k >= 0 && !dir) { this.ladderK = k; this.my = y1 + 0.01; } else this.stepOff(d, false, dir); }
       else this.my = clamp(this.my, y0, y1);
       if (this.mode === 'ladder' && dir && (this.my === y0 || this.my === y1)) this.stepOff(d, this.my === y0, dir);
     } else {
