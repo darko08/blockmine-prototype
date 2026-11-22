@@ -5,3 +5,6 @@ Assets/sheets/cutaway/
 # 3D preview: the large source models stay out of git (re-downloadable; see art-source/README.md)
 art-source/miner/miner_source.glb
 art-source/models/*.glb
+
+# raw Mixamo downloads stay local (Mixamo allows them in a game, not shared as raw files); the game uses 3d/models/miner.glb
+art-source/mixamo/
