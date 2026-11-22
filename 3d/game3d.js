@@ -32,6 +32,9 @@ const V = {
   bitcoinEmissive: [0.35, 0.55, 0.8, 1.1],
   lampSize: 0.16,            // the belt lantern's height, handle included, as a share of his height
   lampHook: [0.04, 0.02, 0.15],   // the belt hook, from his hips: forward, up, to his right (shares of his height)
+  turnRate: 7,               // how quickly he turns to face a new way (higher = snappier)
+  pickLength: 0.62,          // the pick's handle, as a share of his height
+  bagBack: 0.17,             // how far behind his chest bone the bag hangs (his back is about 0.1 behind it)
   pileScale: 1.3,            // 3D deposit piles are this much taller than the 2D pile heights (their base is wide rubble)
   walkStride: 46,            // world units per walk cycle (as the walk animation is timed)
   climbStride: 26,           // world units climbed per climbing cycle (two hand-over-hand reaches)
@@ -86,7 +89,7 @@ const loader = new GLTFLoader();
 const texLoader = new THREE.TextureLoader();
 async function loadAll() {
   const models = {};
-  await Promise.all(MODELS.map((n) => new Promise((res) => loader.load('models/' + n + '.glb?v=5', (g) => { models[n] = g; res(); }, undefined, () => res()))));
+  await Promise.all(MODELS.map((n) => new Promise((res) => loader.load('models/' + n + '.glb?v=6', (g) => { models[n] = g; res(); }, undefined, () => res()))));
   const tex = (p) => new Promise((res) => texLoader.load('../' + p + '?v=' + S.artVersion, (t) => {
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; res(t);
   }, undefined, () => res(null)));
@@ -338,28 +341,35 @@ class Game {
       this.flame = this.glowSprite(0xffe2b0, H * V.flameSize * 2, 0.9); this.flame.position.set(0, -H * V.lampSize * 0.58, 0); this.lampPivot.add(this.flame);
     }
     this.lampGlow = this.glowSprite(0xffb070, S.lightRadius * T * 1.2, V.lampHalo); this.scene.add(this.lampGlow);
-    // the pick: a wooden handle and an iron head, swung from the shoulder in time with the swing animation
+    // the pick, held in his right hand: each frame its handle runs along his forearm, so it follows the swing
     const wood = fogged(new THREE.MeshStandardMaterial({ color: 0x8a6440, roughness: 0.9 }));
     const iron = fogged(new THREE.MeshStandardMaterial({ color: 0x5d5853, roughness: 0.55, metalness: 0.6 }));
-    const pivot = this.pick = new THREE.Group(); pivot.position.set(H * 0.04, H * 0.8, H * 0.12); g.add(pivot);
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(H * 0.017, H * 0.022, H * 0.62, 8), wood);
-    handle.rotation.z = -Math.PI / 2; handle.position.x = H * 0.28; pivot.add(handle);
-    const head = new THREE.Mesh(new THREE.TorusGeometry(H * 0.17, H * 0.022, 6, 16, Math.PI * 0.75), iron);
-    head.position.set(H * 0.56, -H * 0.15, 0); head.rotation.z = Math.PI * 0.12; pivot.add(head);
-    for (const m of [handle, head]) m.castShadow = true;
+    const pick = this.pick = new THREE.Group(); pick.matrixAutoUpdate = false; g.add(pick);
+    const L = V.pickLength * H;
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(H * 0.016, H * 0.02, L, 8), wood);
+    handle.position.y = L * 0.42; pick.add(handle);
+    const head = new THREE.Mesh(new THREE.CylinderGeometry(H * 0.022, H * 0.022, L * 0.62, 8), iron);
+    head.rotation.z = Math.PI / 2; head.position.y = L * 0.9; pick.add(head);
+    for (const sgn of [-1, 1]) {   // the two points
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(H * 0.022, L * 0.16, 8), iron);
+      tip.rotation.z = -sgn * Math.PI / 2; tip.position.set(sgn * L * 0.39, L * 0.9, 0); pick.add(tip);
+    }
+    pick.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+    this.bones = { hand: body.getObjectByName('handR'), elbow: body.getObjectByName('forearmR'), chest: body.getObjectByName('chest') };
     // the bag on his back, from the 2D art: empty (flat, no glow), half-full and full; one is shown at a time
     this.bags = {};
     for (const [k, h] of [['empty', 0.46], ['half', 0.5], ['full', 0.56]]) {
       const holder = new THREE.Group(), o = place(this.A.models['bag_' + k], H * h, { cloneMat: true });
       o.rotation.y = -Math.PI / 2 + 0.35;   // its front faces backward, turned a little toward you
-      holder.add(o); holder.position.set(-H * 0.2, H * (0.88 - h), -H * 0.02); holder.visible = false; g.add(holder);
+      o.position.y = -H * h; holder.userData.h = h;   // the holder is the strap's top, at his shoulder
+      holder.add(o); holder.visible = false; g.add(holder);
       holder.userData.mats = []; o.traverse((m) => m.isMesh && holder.userData.mats.push(m.material));
       if (k !== 'empty') holder.userData.mats.forEach((mt) => { mt.emissive = new THREE.Color(0xffa040); mt.emissiveMap = mt.map; mt.needsUpdate = true; });
       this.bags[k] = holder;
     }
     this.bagGlow = this.glowSprite(0xffb547, 30, 0); g.add(this.bagGlow);
   }
-  setAnim(name, fade = 0.18) {
+  setAnim(name, fade = 0.28) {
     if (this.anim === name || !this.acts[name]) return;
     const next = this.acts[name], prev = this.anim && this.acts[this.anim];
     next.reset(); next.setEffectiveWeight(1); next.play();
@@ -742,7 +752,7 @@ class Game {
     let yaw = this.facing > 0 ? -0.45 : Math.PI + 0.45;
     if (this.mode === 'ladder') yaw = Math.PI / 2;
     if (this.mining) yaw = this.facing > 0 ? -0.15 : Math.PI + 0.15;
-    g.rotation.y += (((yaw - g.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, real * 12);
+    g.rotation.y += (((yaw - g.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, real * V.turnRate);
     g.rotation.z = this.stun > 0 ? Math.sin(this.clock * 7) * 0.1 : 0;
     this.swingT = Math.max(0, this.swingT - dt);
     const sp = this.speeds();
@@ -753,10 +763,20 @@ class Game {
     else if (this.moving) { this.setAnim('walk'); this.acts.walk.timeScale = sp.walk / 46; }
     else this.setAnim('idle');
     this.mixer.update(real * Math.max(1, this.speed));
-    if (this.pick) {
+    // the skeleton as this frame's animation left it, for the pick, the bag and the lantern hook
+    g.updateMatrixWorld(true);
+    const at = (bone) => { const p = new THREE.Vector3(); bone.getWorldPosition(p); return g.worldToLocal(p); };
+    if (this.pick && this.bones.hand && this.bones.elbow) {
       this.pick.visible = !!(this.mining || this.swingT > 0);
-      const u = this.acts.swing ? (this.acts.swing.time / this.acts.swing.getClip().duration) : 0, strike = Math.sin(Math.min(1, u * 2) * Math.PI / 2) * (u < 0.5 ? 1 : 1 - (u - 0.5) * 2);
-      this.pick.rotation.z = THREE.MathUtils.lerp(1.9, -0.55, this.swingT > 0 ? strike : 0);
+      const hand = at(this.bones.hand), elbow = at(this.bones.elbow);
+      const y = hand.clone().sub(elbow).normalize(), side = new THREE.Vector3(0, 0, 1);
+      const x = new THREE.Vector3().crossVectors(side, y).normalize(), z = new THREE.Vector3().crossVectors(x, y);
+      this.pick.matrix.makeBasis(x, y, z).setPosition(hand.addScaledVector(y, -H * 0.03));
+      this.pick.matrixWorldNeedsUpdate = true;
+    }
+    if (this.bones.chest) {   // the bag hangs from his shoulders, against his back, leaning with him
+      const c = at(this.bones.chest);
+      for (const k in this.bags) { const b = this.bags[k]; b.position.set(c.x - H * V.bagBack, c.y + H * 0.1, c.z - H * 0.02); b.rotation.set(this.bagRoll || 0, 0, -0.1 + (this.bagAng || 0)); }
     }
     // the bag on his back: flat at 0, half-full from 1, full from bagFullAt; its ore glows only with ore in it
     const bw = this.bagWeight(), fill = Math.min(1, bw / S.bagCapacity), hasOre = this.bag.length > 0;
@@ -768,7 +788,6 @@ class Game {
     this.bagGlow.material.opacity = hasOre ? (lit ? 0.06 : 0.35) * (0.5 + fill) : 0;
     // the belt lantern: the hook follows his hips; the lantern swings like a pendulum when he speeds up, stops or turns
     if (this.hips) {
-      g.updateMatrixWorld(true);   // the skeleton as this frame's animation left it
       const hp = new THREE.Vector3(); this.hips.getWorldPosition(hp); g.worldToLocal(hp);
       this.lampPivot.position.set(hp.x + H * V.lampHook[0], hp.y + H * V.lampHook[1], hp.z + H * V.lampHook[2]);
     }
@@ -778,6 +797,14 @@ class Game {
     this.lampVel += ((target - this.lampAng) * 38 - this.lampVel * 3.2) * Math.min(real, 0.05);
     this.lampAng += this.lampVel * Math.min(real, 0.05);
     this.lampPivot.rotation.z = this.lampAng;
+    // the bag swings the same way, heavier and slower; a fuller bag swings less
+    const heavy = 1 - 0.5 * fill, kdt = Math.min(real, 0.05);
+    const bagTarget = clamp(-fwd * 0.0035, -0.3, 0.3) * heavy + (this.moving ? Math.sin((this.walkDist / V.walkStride) * Math.PI * 4) * 0.05 * heavy : 0);
+    this.bagVel = (this.bagVel || 0) + ((bagTarget - (this.bagAng || 0)) * 22 - (this.bagVel || 0) * 2.6) * kdt;
+    this.bagAng = (this.bagAng || 0) + this.bagVel * kdt;
+    const rollTarget = this.mode === 'ladder' ? clamp(this.climbV * 0.004, -0.2, 0.2) : 0;
+    this.bagRollVel = (this.bagRollVel || 0) + ((rollTarget - (this.bagRoll || 0)) * 22 - (this.bagRollVel || 0) * 2.6) * kdt;
+    this.bagRoll = (this.bagRoll || 0) + this.bagRollVel * kdt;
     // the lamp
     this.minerRoot.updateMatrixWorld(true);
     const L = this.lamp();
