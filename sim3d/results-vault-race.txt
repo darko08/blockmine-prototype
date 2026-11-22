@@ -1,0 +1,9 @@
+
+=== the Vault race: one runner alone vs ten racing for the one piece each block
+  10 miners ·  1 vault runner  · return 16% · caught 42.0% · ahead 0.0% · best1% 228
+  50 miners ·  1 vault runner  · return 55% · caught 40.9% · ahead 33.0% · best1% 820
+  50 miners · 10 vault runners · return 8% · caught 37.5% · ahead 4.8% · best1% 657
+ 200 miners ·  1 vault runner  · return 98% · caught 38.9% · ahead 13.2% · best1% 3,239
+ 200 miners · 10 vault runners · return 30% · caught 37.7% · ahead 4.0% · best1% 2,828
+
+ALL CHECKS PASS · 100,000 shifts per strategy per crowd · 4,212.8 s
