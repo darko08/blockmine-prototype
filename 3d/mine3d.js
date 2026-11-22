@@ -124,7 +124,8 @@
     const perRatio = ratioSum > 0 ? Math.max(0, now) / ratioSum : 0;
     mine.amberPlaced = 0;
     for (const p of plan) {
-      const v = p.kind === 'amber' ? Math.floor(p.ratio * perRatio) : 0;
+      const g = Math.sqrt(-2 * Math.log(1 - rng())) * Math.cos(2 * Math.PI * rng()), sp = R.amberValueSpread || 0;
+      const v = p.kind === 'amber' ? Math.floor(p.ratio * perRatio * Math.exp(sp * g - sp * sp / 2)) : 0;   // pieces vary, the mean is kept
       const n = makeNode(mine, rng, p.l, p.kind, v);
       if (n) mine.amberPlaced += v;
     }
