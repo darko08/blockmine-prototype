@@ -24,6 +24,7 @@ const fmt = (n) => Math.round(n).toLocaleString('en');
 // ---- the look of the 3D version (its own numbers; the rules' numbers stay in cutaway/settings.js) ----
 const V = {
   depth: 2.3 * T,            // how deep the tunnels go into the rock, front to back
+  levelMarkEvery: 9, levelMarkGlow: 0.12,   // the level painted on the back wall: tiles between marks; how much the paint catches the dark
   viewHeight: S.minerHeight / S.minerScreenShare,   // world units the camera shows top to bottom, as in 2D
   fov: 32, tilt: 0.07,       // camera: field of view, and a slight look down
   viewWidthPortrait: 240,    // world units across on a tall screen (7.5 tiles), so the tunnel ahead shows
@@ -370,6 +371,20 @@ class Game {
       // the level number at the start of each level
       const label = this.textSprite('LEVEL ' + (l + 1), 11); label.position.set(x + 4, -(cy - 3), zf); label.center.set(0, 0); this.world.add(label);
       label.material.depthTest = false; label.renderOrder = 30; label.visible = false; (this.levelLabels = this.levelLabels || [])[l] = label;   // shown whole once he gets there, never half under the dark
+      // the level painted on the back wall, the way real mines mark their levels: at the start, by every ladder and every
+      // few metres between, so wherever his lamp is there is one in its light. Clear of the timber posts and the ladders.
+      const posts = G.zone(l) === 3 ? [] : MineGen.postsIn(S, G.zone(l), x + T * 0.5, x + w - T * 0.5);
+      const spots = [x + T * 1.6, ...ladderXs.map((v) => v + T * 1.3)];
+      for (let px = x + T * 1.6 + V.levelMarkEvery * T; px < x + w - T; px += V.levelMarkEvery * T) spots.push(px);
+      const free = (px) => px > x + T && px < x + w - T * 0.8 && posts.every((v) => Math.abs(v - px) > T * 0.75) && ladderXs.every((v) => Math.abs(v - px) > T * 0.9);
+      const placed = [];
+      for (let px of spots) {
+        for (const nudge of [0, 0.5, -0.5, 1, -1]) { if (free(px + nudge * T)) { px += nudge * T; break; } }
+        if (!free(px) || placed.some((v) => Math.abs(v - px) < T * 3)) continue;
+        placed.push(px);
+        const mark = new THREE.Mesh(this.levelMarkGeo || (this.levelMarkGeo = new THREE.PlaneGeometry(T * 1.05, T * 0.7)), this.levelMarkMat(l));
+        mark.position.set(px, -(fy - S.tunnelHeight * T * 0.6), zb + 0.6); mark.userData.own = true; this.world.add(mark);
+      }
     });
     this.placeVaultShow();
     // the headframe over the shaft, and the hatch lid when the hatch is shut
@@ -397,6 +412,26 @@ class Game {
     }
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: alpha }));
     s.scale.set(size, size, 1); return s;
+  }
+  // the paint for one level's mark: "LEVEL" stencilled small over a big number, worn and streaked, the paint lit by his lamp
+  levelMarkMat(l) {
+    this.levelMarkMats = this.levelMarkMats || [];
+    if (this.levelMarkMats[l]) return this.levelMarkMats[l];
+    const c = document.createElement('canvas'); c.width = 256; c.height = 170; const g = c.getContext('2d'), rnd = seededRandom('mark' + l);
+    const paint = l < 3 ? '#e8dcc0' : l < 7 ? '#e9c77a' : l < 12 ? '#e39a52' : '#d8573c';   // pale up top, rust-red down deep
+    g.fillStyle = paint; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '700 34px "Cormorant Garamond", Georgia, serif'; g.save(); g.translate(128, 30); g.scale(1.25, 1); g.fillText('L E V E L', 0, 0); g.restore();
+    g.font = '700 128px "Cormorant Garamond", Georgia, serif'; g.fillText(String(l + 1), 128, 108);
+    g.fillRect(40, 54, 176, 4);   // a painted rule between them
+    // drips from the paint, and wear: specks and scrapes where the rock shows through
+    for (let i = 0; i < 7; i++) { const dx = 60 + rnd() * 136, dy = 120 + rnd() * 20; g.fillRect(dx, dy, 2 + rnd() * 2, 10 + rnd() * 28); }
+    g.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 420; i++) { g.globalAlpha = 0.3 + rnd() * 0.7; g.beginPath(); g.arc(rnd() * 256, rnd() * 170, 0.6 + rnd() * 2.6, 0, Math.PI * 2); g.fill(); }
+    for (let i = 0; i < 6; i++) { g.globalAlpha = 0.5; g.lineWidth = 1 + rnd() * 3; g.beginPath(); const sx = rnd() * 256, sy = rnd() * 170; g.moveTo(sx, sy); g.lineTo(sx + 30 + rnd() * 60, sy + (rnd() - 0.5) * 30); g.stroke(); }
+    g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    const m = fogged(new THREE.MeshStandardMaterial({ map: t, transparent: true, depthWrite: false, roughness: 1, metalness: 0, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: V.levelMarkGlow, polygonOffset: true, polygonOffsetFactor: -2 }));
+    return (this.levelMarkMats[l] = m);
   }
   textSprite(text, h) {
     const c = document.createElement('canvas'), g = c.getContext('2d'), fs = 64;
