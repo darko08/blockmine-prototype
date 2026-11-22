@@ -24,6 +24,7 @@ const fmt = (n) => Math.round(n).toLocaleString('en');
 // ---- the look of the 3D version (its own numbers; the rules' numbers stay in cutaway/settings.js) ----
 const V = {
   depth: 2.3 * T,            // how deep the tunnels go into the rock, front to back
+  levelMarkEvery: 9, levelMarkGlow: 0.12,   // the level painted on the back wall: tiles between marks; how much the paint catches the dark
   viewHeight: S.minerHeight / S.minerScreenShare,   // world units the camera shows top to bottom, as in 2D
   fov: 32, tilt: 0.07,       // camera: field of view, and a slight look down
   viewWidthPortrait: 240,    // world units across on a tall screen (7.5 tiles), so the tunnel ahead shows
@@ -370,6 +371,20 @@ class Game {
       // the level number at the start of each level
       const label = this.textSprite('LEVEL ' + (l + 1), 11); label.position.set(x + 4, -(cy - 3), zf); label.center.set(0, 0); this.world.add(label);
       label.material.depthTest = false; label.renderOrder = 30; label.visible = false; (this.levelLabels = this.levelLabels || [])[l] = label;   // shown whole once he gets there, never half under the dark
+      // the level painted on the back wall, the way real mines mark their levels: at the start, by every ladder and every
+      // few metres between, so wherever his lamp is there is one in its light. Clear of the timber posts and the ladders.
+      const posts = G.zone(l) === 3 ? [] : MineGen.postsIn(S, G.zone(l), x + T * 0.5, x + w - T * 0.5);
+      const spots = [x + T * 1.6, ...ladderXs.map((v) => v + T * 1.3)];
+      for (let px = x + T * 1.6 + V.levelMarkEvery * T; px < x + w - T; px += V.levelMarkEvery * T) spots.push(px);
+      const free = (px) => px > x + T && px < x + w - T * 0.8 && posts.every((v) => Math.abs(v - px) > T * 0.75) && ladderXs.every((v) => Math.abs(v - px) > T * 0.9);
+      const placed = [];
+      for (let px of spots) {
+        for (const nudge of [0, 0.5, -0.5, 1, -1]) { if (free(px + nudge * T)) { px += nudge * T; break; } }
+        if (!free(px) || placed.some((v) => Math.abs(v - px) < T * 3)) continue;
+        placed.push(px);
+        const mark = new THREE.Mesh(this.levelMarkGeo || (this.levelMarkGeo = new THREE.PlaneGeometry(T * 1.05, T * 0.7)), this.levelMarkMat(l));
+        mark.position.set(px, -(fy - S.tunnelHeight * T * 0.6), zb + 0.6); mark.userData.own = true; this.world.add(mark);
+      }
     });
     this.placeVaultShow();
     // the headframe over the shaft, and the hatch lid when the hatch is shut
@@ -397,6 +412,26 @@ class Game {
     }
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: alpha }));
     s.scale.set(size, size, 1); return s;
+  }
+  // the paint for one level's mark: "LEVEL" stencilled small over a big number, worn and streaked, the paint lit by his lamp
+  levelMarkMat(l) {
+    this.levelMarkMats = this.levelMarkMats || [];
+    if (this.levelMarkMats[l]) return this.levelMarkMats[l];
+    const c = document.createElement('canvas'); c.width = 256; c.height = 170; const g = c.getContext('2d'), rnd = seededRandom('mark' + l);
+    const paint = l < 3 ? '#e8dcc0' : l < 7 ? '#e9c77a' : l < 12 ? '#e39a52' : '#d8573c';   // pale up top, rust-red down deep
+    g.fillStyle = paint; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '700 34px "Cormorant Garamond", Georgia, serif'; g.save(); g.translate(128, 30); g.scale(1.25, 1); g.fillText('L E V E L', 0, 0); g.restore();
+    g.font = '700 128px "Cormorant Garamond", Georgia, serif'; g.fillText(String(l + 1), 128, 108);
+    g.fillRect(40, 54, 176, 4);   // a painted rule between them
+    // drips from the paint, and wear: specks and scrapes where the rock shows through
+    for (let i = 0; i < 7; i++) { const dx = 60 + rnd() * 136, dy = 120 + rnd() * 20; g.fillRect(dx, dy, 2 + rnd() * 2, 10 + rnd() * 28); }
+    g.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 420; i++) { g.globalAlpha = 0.3 + rnd() * 0.7; g.beginPath(); g.arc(rnd() * 256, rnd() * 170, 0.6 + rnd() * 2.6, 0, Math.PI * 2); g.fill(); }
+    for (let i = 0; i < 6; i++) { g.globalAlpha = 0.5; g.lineWidth = 1 + rnd() * 3; g.beginPath(); const sx = rnd() * 256, sy = rnd() * 170; g.moveTo(sx, sy); g.lineTo(sx + 30 + rnd() * 60, sy + (rnd() - 0.5) * 30); g.stroke(); }
+    g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    const m = fogged(new THREE.MeshStandardMaterial({ map: t, transparent: true, depthWrite: false, roughness: 1, metalness: 0, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: V.levelMarkGlow, polygonOffset: true, polygonOffsetFactor: -2 }));
+    return (this.levelMarkMats[l] = m);
   }
   textSprite(text, h) {
     const c = document.createElement('canvas'), g = c.getContext('2d'), fs = 64;
@@ -921,7 +956,7 @@ class Game {
     this.mine = MineGen.generate(b.hash, S, RULES, 1);
     MineGen.layoutTerrain(this.mine); MineGen.layoutNodes(this.mine, this.eco.budget());
     this.mine.spawnRng = seededRandom(b.hash + '|spawn'); this.mine.spawnT = 0;
-    this.lampLit = false; this.oilLeft = 0;   // a new shift: a new lamp to light
+    this.lampLit = false;   // a new block: a new lamp to light (oil not yet burnt keeps; the knock takes it only from those caught below)
     this.hatch = 'open';
     this.buildMine();
     this.mine.nodes.forEach((n) => this.showNode(n));
@@ -1102,16 +1137,17 @@ class Game {
     }
     const m = this.mine, best = tg.k;
     if (m.ladders[best].top === -1 && this.lvl === -1 && this.hatch !== 'open') { this.say('The hatch is shut.', 2); return; }
-    if (this.net && m.ladders[best].top === -1 && this.lvl === -1 && !this.lampLit) {   // online: the server lights the lamp and lets him in
-      if (this.purse.lamps < 1) { this.say(this.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.', 3); this.openShop(); return; }
+    if (this.net && m.ladders[best].top === -1 && this.lvl === -1 && !this.inShift) {   // online: the server lets him in (and lights a lamp if none burns this block)
+      if (!this.lampLit && this.purse.lamps < 1) { this.say(this.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.', 3); this.openShop(); return; }
       this.net.send({ t: 'enter' }); return;
     }
-    if (m.ladders[best].top === -1 && this.lvl === -1 && !this.lampLit) {   // one lamp is one shift: light one to go down
+    if (m.ladders[best].top === -1 && this.lvl === -1 && this.lampLit && !this.inShift && !this.net) this.say('Your lamp still burns: it lasts until the next block', 2.5);
+    if (m.ladders[best].top === -1 && this.lvl === -1 && !this.lampLit) {   // one lamp lasts the block: light one to go down
       this.freshMoney();
       if (this.purse.lamps < 1) { this.say(this.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.', 3); this.openShop(); return; }
       this.purse.lamps -= 1; this.lampLit = true; this.saveMoney();
       this.shiftCost = RULES.lampPrice + this.oilLeft * RULES.oilPrice; this.pastEven = false;   // what this shift must bring back to break even
-      this.say('Lamp lit for this shift' + (this.oilLeft ? ' · ' + this.oilLeft + ' measure' + (this.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
+      this.say('Lamp lit until the next block' + (this.oilLeft ? ' · ' + this.oilLeft + ' measure' + (this.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
     }
     this.mode = 'ladder'; this.ladderK = best; this.mx = m.G.colX(m.ladders[best].c); this.mining = null;
   }
@@ -1277,12 +1313,12 @@ class Game {
       if (k < 0) { this.goal = null; this.markGoal(); return null; }
       tx = G.colX(m.ladders[k].c);
       if (Math.abs(tx - this.mx) <= S.grabRange * T * 0.8) {
-        if (down && this.lvl === -1 && !this.lampLit) {   // the hatch: light a lamp first (online, the server lets him in)
+        if (down && this.lvl === -1 && (this.net ? !this.inShift : !this.lampLit)) {   // the hatch: light a lamp first (online, the server lets him in)
           if (performance.now() < (this.enterAt || 0)) return null;
           this.enterAt = performance.now() + 2000;
           this.action();
           if (this.mode !== 'ladder' && !this.net) { this.goal = null; this.markGoal(); }
-          if (this.hatch !== 'open' || this.purse.lamps < 1) { this.goal = null; this.markGoal(); }
+          if (this.hatch !== 'open' || (!this.lampLit && this.purse.lamps < 1)) { this.goal = null; this.markGoal(); }
           return null;
         }
         this.mode = 'ladder'; this.ladderK = k; this.mx = tx; return null;
@@ -1371,7 +1407,8 @@ class Game {
       if (kept) this.coinsToNet(Math.min(24, 4 + Math.round(Math.log2(1 + kept) * 2)));
     }
     this.bag = []; this.inShift = false;
-    this.lampLit = false; this.oilLeft = 0; this.shiftCost = 0;   // the shift is over: the next trip down lights a new lamp
+    this.shiftCost = Math.max(0, (this.shiftCost || 0) - kept);   // the lamp burns on until the next block: what is still to win back
+    // (lampLit and the oil left stay: one lamp lasts the whole block, however many trips he makes)
     const m = mineralText(mins);
     if (kept || m) {
       this.say((vaultPiece ? 'The Vault piece is yours! ' : '') + 'Kept ' + [kept ? fmt(kept) + ' sats' : '', m].filter(Boolean).join(' · ') + (kept ? ' (the Order takes a tenth)' : ''), 4);
@@ -1684,11 +1721,11 @@ class Game {
     $('buyKit').onclick = () => { if (this.net) return this.net.send({ t: 'buy', item: 'kit' }); this.freshMoney(); if (this.purse.buyKit(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
     $('buyLamp').onclick = () => { if (this.net) return this.net.send({ t: 'buy', item: 'lamp' }); this.freshMoney(); if (this.purse.buyLamp(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
     $('buyOil').onclick = () => {
-      if (this.below() || this.lampLit) { this.say('Oil is bought before you go down.', 2); return; }
+      if (this.below()) { this.say('Oil is bought on the surface.', 2); return; }
       if (this.oilLeft >= RULES.oilMaxMeasures) return;
       if (this.net) return this.net.send({ t: 'buy', item: 'oil' });
       this.freshMoney();
-      if (this.purse.buyOil(this.eco, 1)) { this.oilLeft += 1; Sound.tick(); this.saveMoney(); }
+      if (this.purse.buyOil(this.eco, 1)) { this.oilLeft += 1; if (this.lampLit) this.shiftCost = (this.shiftCost || 0) + RULES.oilPrice; Sound.tick(); this.saveMoney(); }
       this.openShop();
     };
     $('catch').textContent = 'Blocks come at random, every ten minutes on average. The chance one lands within ' +
@@ -1710,7 +1747,7 @@ class Game {
     $('ovBtn').onclick = () => { $('overlay').style.display = 'none'; this.overlay = false; };
   }
   openShop() {
-    const p = this.purse, R = RULES, onTop = !this.below() && !this.lampLit;
+    const p = this.purse, R = RULES, onTop = !this.below();
     $('shopPoints').textContent = fmt(p.points); $('shopLamps').textContent = p.lamps; $('shopOil').textContent = this.oilLeft;
     $('buyKit').style.display = p.hasKit ? 'none' : ''; $('buyKit').disabled = !p.canBuyKit();
     $('buyLamp').style.display = p.hasKit ? '' : 'none'; $('buyLamp').disabled = p.points < R.lampPrice;
@@ -1728,7 +1765,7 @@ class Game {
   }
   hud() {
     this.set('oil', this.oilLeft > 0 ? this.oilLeft.toFixed(1) : this.lampLit ? 'basic' : '–');
-    this.set('lamps', this.lampLit ? 'lamp lit · ' + this.purse.lamps + ' spare' : this.purse.lamps + ' lamp' + (this.purse.lamps === 1 ? '' : 's'));
+    this.set('lamps', this.lampLit ? 'lamp lit to next block · ' + this.purse.lamps + ' spare' : this.purse.lamps + ' lamp' + (this.purse.lamps === 1 ? '' : 's'));
     const w = this.bagWeight();
     this.set('bagW', w + '/' + RULES.bagCapacity);
     {   // the bag: sats carried, and in a shift the mark it must pass to break even (you keep 90% past the hatch)
@@ -1811,11 +1848,12 @@ class Net {
         Sound.knock(); g.shake = 0.45; g.hatch = 'shut'; g.mining = null; break;
       case 'state': this.state(m); break;
       case 'entered':
-        g.purse = Purse(RULES, m.purse); g.lampLit = true; g.oilLeft = m.oil; g.inShift = true; g.bag = [];
-        g.shiftCost = RULES.lampPrice + (m.oil || 0) * RULES.oilPrice; g.pastEven = false;
+        g.purse = Purse(RULES, m.purse); g.oilLeft = m.oil; g.inShift = true; g.bag = [];
+        if (!m.relit || !g.lampLit) g.shiftCost = RULES.lampPrice + (m.oil || 0) * RULES.oilPrice;   // a new lamp; a lamp already burning costs nothing more
+        g.lampLit = true; g.pastEven = false;
         records.get().shifts++; records.save();
         g.mode = 'ladder'; g.ladderK = 0; g.mx = g.mine.G.colX(g.mine.ladders[0].c); g.my = 0; g.mining = null;
-        g.say('Lamp lit for this shift' + (g.oilLeft ? ' · ' + g.oilLeft + ' measure' + (g.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
+        g.say((m.relit ? 'Your lamp still burns: it lasts until the next block' : 'Lamp lit until the next block') + (g.oilLeft ? ' · ' + g.oilLeft + ' measure' + (g.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
         break;
       case 'got': {
         const n = g.nodes.find((q) => q.id === m.id);
@@ -1831,10 +1869,11 @@ class Net {
       case 'bag': g.bag = m.bag.map((it) => this.item(it)); break;
       case 'snap': this.snap(m.place); break;
       case 'banked': {
-        g.purse = Purse(RULES, m.purse); g.inShift = false; g.lampLit = false; g.oilLeft = 0;
+        g.purse = Purse(RULES, m.purse); g.inShift = false; g.oilLeft = m.oil || 0;   // the lamp burns on until the next block
         g.addBlockKept(m.kept);
         const r = records.get(); r.totalPoints += m.kept; r.survived = (r.survived || 0) + 1; if (m.piece) r.vaultPieces = (r.vaultPieces || 0) + 1;
         r.best = Math.max(r.best || 0, m.kept - (g.shiftCost || 0)); records.save();
+        g.shiftCost = Math.max(0, (g.shiftCost || 0) - m.kept);
         if (m.kept) g.coinsToNet(Math.min(24, 4 + Math.round(Math.log2(1 + m.kept) * 2)));
         const mins = {}; for (const it of m.bag) if (it.kind !== 'amber' && it.kind !== 'vault') mins[it.kind] = (mins[it.kind] || 0) + 1;
         g.bag = [];

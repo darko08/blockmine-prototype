@@ -78,7 +78,7 @@ class Shaft {
     if (!saved) { token = crypto.randomBytes(16).toString('hex'); saved = { name: 'Miner ' + (1000 + Math.floor(Math.random() * 9000)), purse: null }; }
     let p = this.players.get(token);
     if (!p) {
-      p = { token, name: saved.name, purse: Purse(R, saved.purse), shift: false, place: { l: -1, x: 0 }, placeT: 0, bag: [], oil: 0,
+      p = { token, name: saved.name, purse: Purse(R, saved.purse), shift: false, place: { l: -1, x: 0 }, placeT: 0, bag: [], oil: saved.lit ? saved.oil || 0 : 0, lit: saved.lit || null,
         mining: null, known: new Set(), glim: new Set(), sendT: 0, msgs: 0, msgT: 0, facing: 1, id: crypto.randomBytes(4).toString('hex') };
       this.players.set(token, p);
     }
@@ -131,11 +131,13 @@ class Shaft {
   }
   enter(p) {
     if (p.shift || this.hatch !== 'open' || !this.mine) return p.conn.send({ t: 'say', text: this.hatch !== 'open' ? 'The hatch is shut.' : 'You are already below.' });
-    if (p.purse.lamps < 1) return p.conn.send({ t: 'say', text: p.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.' });
-    p.purse.lamps -= 1; p.shift = true; p.shiftStart = this.clock; p.bag = []; p.mining = null;
+    const relit = p.lit === this.block.height;   // one lamp lasts the whole block, however many trips
+    if (!relit && p.purse.lamps < 1) return p.conn.send({ t: 'say', text: p.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.' });
+    if (!relit) { p.purse.lamps -= 1; p.lit = this.block.height; }
+    p.shift = true; p.shiftStart = this.clock; p.bag = []; p.mining = null;
     p.place = { k: 0, y: this.mine.G.floorY(-1) }; p.placeT = this.clock; p.deepest = -1;
     this.savePlayer(p);
-    p.conn.send({ t: 'entered', purse: p.purse.toJSON(), oil: p.oil, place: p.place });
+    p.conn.send({ t: 'entered', purse: p.purse.toJSON(), oil: p.oil, place: p.place, relit });
   }
 
   // ---------- movement: the server accepts a new place only if he could have got there in the time since the last ----------
@@ -252,9 +254,10 @@ class Shaft {
     const pieceValue = piece ? this.eco.vaultPieceValue() : 0;
     const kept = this.eco.carriedOut(sats, pieceValue);
     if (piece) this.vaultEvent('out', pieceValue, p.name);
-    p.purse.points += kept; p.shift = false; p.oil = 0; p.mining = null;
+    p.oil = Math.max(0, p.oil - (this.clock - p.shiftStart) / R.oilSecondsPerMeasure);   // oil burns only below; what is left keeps for the next trip
+    p.purse.points += kept; p.shift = false; p.mining = null;
     const bag = p.bag; p.bag = []; this.stats.banked++;
-    p.conn && p.conn.send({ t: 'banked', kept, piece, bag, purse: p.purse.toJSON() });
+    p.conn && p.conn.send({ t: 'banked', kept, piece, bag, purse: p.purse.toJSON(), oil: p.oil });
     this.savePlayer(p); this.dirty = true;
   }
   caught(p) {
@@ -262,7 +265,7 @@ class Shaft {
     this.eco.caught(sats); this.vaultEvent('knock', Math.min(sats, this.eco.pot) * R.caughtTo.vault);
     if (p.bag.some((it) => it.kind === 'vault')) this.returnVault();
     if (p.mining) { p.mining.n.miner = null; p.mining = null; }
-    p.bag = []; p.shift = false; p.oil = 0; this.stats.caught++;
+    p.bag = []; p.shift = false; p.oil = 0; p.lit = null; this.stats.caught++;
     p.place = { l: -1, x: this.surfaceX() };
     p.conn && p.conn.send({ t: 'caught', sats, purse: p.purse.toJSON() });
     this.savePlayer(p); this.dirty = true;
@@ -345,7 +348,7 @@ class Shaft {
   broadcast(msg) { for (const c of this.conns) if (c.player) c.send(msg); }
 
   // ---------- keeping ----------
-  savePlayer(p) { this.store.set('p:' + p.token, { name: p.name, purse: p.purse.toJSON() }); }
+  savePlayer(p) { this.store.set('p:' + p.token, { name: p.name, purse: p.purse.toJSON(), lit: p.lit || null, oil: p.shift ? 0 : p.oil }); }
   save() { this.store.set('economy', this.eco.toJSON()); this.store.flush(); this.dirty = false; this.savedT = this.clock; }
   health() {
     const ps = [...this.players.values()];
