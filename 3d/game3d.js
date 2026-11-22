@@ -1292,6 +1292,7 @@ class Game {
       if (kept) this.coinsToNet(Math.min(24, 4 + Math.round(Math.log2(1 + kept) * 2)));
     }
     this.bag = []; this.inShift = false;
+    this.lampLit = false; this.oilLeft = 0; this.shiftCost = 0;   // the shift is over: the next trip down lights a new lamp
     const m = mineralText(mins);
     if (kept || m) {
       this.say((vaultPiece ? 'The Vault piece is yours! ' : '') + 'Kept ' + [kept ? fmt(kept) + ' sats' : '', m].filter(Boolean).join(' · ') + (kept ? ' (the Order takes a tenth)' : ''), 4);
@@ -1661,10 +1662,12 @@ class Game {
     }
     this.set('bag', 'carried, not kept' + (this.bag.some((p) => p.kind === 'vault') ? ' · the Vault piece' : '') + (mineralText(this.bagMinerals()) ? ' · ' + mineralText(this.bagMinerals()) : '') + (w >= RULES.bagCapacity ? ' · full' : ''));
     {   // net: everything kept minus everything spent on the kit, lamps and oil (points start at the same amount for everyone)
+      // the main number: every sat carried past the hatch so far; beside it, net of what the kit, lamps and oil cost
       const rv = records.get(), net = this.purse.points - RULES.startPoints, kept = rv.totalPoints || 0;
-      this.set('vaultSats', (net > 0 ? '+' : net < 0 ? '\u2212' : '') + fmt(Math.abs(net)));
-      if (Math.sign(net) !== this.last.netSign) { this.last.netSign = Math.sign(net); $('vaultSats').classList.toggle('neg', net < 0); $('vaultSats').classList.toggle('pos', net > 0); }
-      this.set('vault', 'kept ' + fmt(kept) + ' \u00b7 spent ' + fmt(kept - net));
+      this.set('vaultSats', fmt(kept));
+      this.set('netSats', (net > 0 ? '+' : net < 0 ? '\u2212' : '\u00b1') + fmt(Math.abs(net)));
+      if (Math.sign(net) !== this.last.netSign) { this.last.netSign = Math.sign(net); $('netSats').classList.toggle('neg', net < 0); $('netSats').classList.toggle('pos', net > 0); }
+      this.set('vault', 'net, after ' + fmt(kept - net) + ' spent on the kit, lamps and oil');
     }
     const r = records.get(), firstShift = r.shifts < S.keysHintShifts || (r.shifts === S.keysHintShifts && this.inShift);
     $('keys').style.display = firstShift ? '' : 'none';
