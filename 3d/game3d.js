@@ -33,13 +33,15 @@ const V = {
   lampSize: 0.16,            // the belt lantern's height, handle included, as a share of his height
   lampHook: [0.04, 0.02, 0.15],   // the belt hook, from his hips: forward, up, to his right (shares of his height)
   turnRate: 7,               // how quickly he turns to face a new way (higher = snappier)
-  pickLength: 0.62,          // the pick's handle, as a share of his height
-  bagBack: 0.17,             // how far behind his chest bone the bag hangs (his back is about 0.1 behind it)
+  pickLength: 0.48,          // the pick, end to end, as a share of his height (a real pick is about 0.9 m)
+  bagBack: 0.09,             // how far behind his chest bone the bag hangs (his back is about 0.1 behind it)
   pileScale: 1.3,            // 3D deposit piles are this much taller than the 2D pile heights (their base is wide rubble)
-  walkStride: 46,            // world units per walk cycle (as the walk animation is timed)
-  climbStride: 26,           // world units climbed per climbing cycle (two hand-over-hand reaches)
+  walkStride: 50,            // world units per cycle of the Mixamo walk (a man 1.8 m tall: about 1.65 m)
+  climbStride: 18,           // world units climbed per cycle of the Mixamo ladder climb (about two rungs)
+  swingSeconds: 1.0,         // one swing of the pick, start to recovery
+  jumpFrom: 0.55, jumpRate: 1.7,   // the jump clip: where the take-off starts (seconds), and how fast it plays
 };
-const MODELS = ['miner', 'dep_bitcoin', 'dep_iron', 'dep_silver', 'dep_amber', 'bag_empty', 'bag_half', 'bag_full', 'ladder', 'headframe', 'cart', 'barrel', 'crate', 'lantern', 'timber'];
+const MODELS = ['miner', 'pick', 'dep_bitcoin', 'dep_iron', 'dep_silver', 'dep_amber', 'bag_empty', 'bag_half', 'bag_full', 'ladder', 'headframe', 'cart', 'barrel', 'crate', 'lantern', 'timber'];
 
 // ---------- sound: mute button and M, remembered in this browser (same as the 2D page) ----------
 const MUTE_KEY = 'blockmine.cutaway.muted';
@@ -89,7 +91,7 @@ const loader = new GLTFLoader();
 const texLoader = new THREE.TextureLoader();
 async function loadAll() {
   const models = {};
-  await Promise.all(MODELS.map((n) => new Promise((res) => loader.load('models/' + n + '.glb?v=6', (g) => { models[n] = g; res(); }, undefined, () => res()))));
+  await Promise.all(MODELS.map((n) => new Promise((res) => loader.load('models/' + n + '.glb?v=10', (g) => { models[n] = g; res(); }, undefined, () => res()))));
   const tex = (p) => new Promise((res) => texLoader.load('../' + p + '?v=' + S.artVersion, (t) => {
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; res(t);
   }, undefined, () => res(null)));
@@ -320,9 +322,11 @@ class Game {
   buildMiner() {
     const mdl = this.A.models.miner;
     const g = this.minerRoot = new THREE.Group(); this.scene.add(g);
-    const body = this.minerBody = SkeletonUtils.clone(mdl.scene); body.scale.setScalar(S.minerHeight); g.add(body);   // the model is 1 unit tall
+    const turn = new THREE.Group(); turn.rotation.y = Math.PI / 2; g.add(turn);   // Mixamo characters face +Z; the game's forward is +X
+    const body = this.minerBody = SkeletonUtils.clone(mdl.scene); turn.add(body);
     body.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; fogged(m.material); m.frustumCulled = false; } });
-    { let lo = 0; body.traverse((m) => { if (m.isSkinnedMesh) { m.computeBoundingBox(); lo = m.boundingBox.min.y; } }); body.position.y = -lo * S.minerHeight; }   // feet on the floor
+    { body.updateMatrixWorld(true); const box = new THREE.Box3().setFromObject(body), k = S.minerHeight / (box.max.y - box.min.y);
+      body.scale.setScalar(k); body.position.y = -box.min.y * k; }   // his height in game units, feet on the floor
     this.mixer = new THREE.AnimationMixer(body);
     this.acts = {};
     for (const clip of mdl.animations) { const a = this.mixer.clipAction(clip); a.play(); a.setEffectiveWeight(0); this.acts[clip.name] = a; }
@@ -330,7 +334,8 @@ class Game {
     const H = S.minerHeight;
     // the lantern on his belt: the one lamp
     // the lantern hangs by its handle from a hook on his belt, at his right hip: it follows his hips and swings a little
-    this.hips = body.getObjectByName('hips');
+    const bone = (n) => body.getObjectByName('mixamorig' + n) || body.getObjectByName('mixamorig:' + n);
+    this.hips = bone('Hips');
     this.lampPivot = new THREE.Group(); g.add(this.lampPivot); this.lampAng = 0; this.lampVel = 0; this.lastMx = null;
     if (this.A.models.lantern) {
       this.beltLamp = place(this.A.models.lantern, H * V.lampSize, { cast: false });
@@ -342,20 +347,18 @@ class Game {
     }
     this.lampGlow = this.glowSprite(0xffb070, S.lightRadius * T * 1.2, V.lampHalo); this.scene.add(this.lampGlow);
     // the pick, held in his right hand: each frame its handle runs along his forearm, so it follows the swing
-    const wood = fogged(new THREE.MeshStandardMaterial({ color: 0x8a6440, roughness: 0.9 }));
-    const iron = fogged(new THREE.MeshStandardMaterial({ color: 0x5d5853, roughness: 0.55, metalness: 0.6 }));
     const pick = this.pick = new THREE.Group(); pick.matrixAutoUpdate = false; g.add(pick);
-    const L = V.pickLength * H;
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(H * 0.016, H * 0.02, L, 8), wood);
-    handle.position.y = L * 0.42; pick.add(handle);
-    const head = new THREE.Mesh(new THREE.CylinderGeometry(H * 0.022, H * 0.022, L * 0.62, 8), iron);
-    head.rotation.z = Math.PI / 2; head.position.y = L * 0.9; pick.add(head);
-    for (const sgn of [-1, 1]) {   // the two points
-      const tip = new THREE.Mesh(new THREE.ConeGeometry(H * 0.022, L * 0.16, 8), iron);
-      tip.rotation.z = -sgn * Math.PI / 2; tip.position.set(sgn * L * 0.39, L * 0.9, 0); pick.add(tip);
+    if (this.A.models.pick) {   // the generated pickaxe, turned so its handle runs along +Y from the grip and its head points along +X
+      const p = this.A.models.pick.scene.clone(true); p.scale.setScalar(H * V.pickLength);
+      p.traverse((m) => { if (m.isMesh) fogged(m.material); });
+      pick.add(p);
     }
     pick.traverse((m) => { if (m.isMesh) m.castShadow = true; });
-    this.bones = { hand: body.getObjectByName('handR'), elbow: body.getObjectByName('forearmR'), chest: body.getObjectByName('chest') };
+    this.bones = { hand: bone('RightHand'), elbow: bone('RightForeArm'), chest: bone('Spine2'), lsh: bone('LeftShoulder'), rsh: bone('RightShoulder') };
+    for (const k in this.bags) this.bags[k].rotation.order = 'YXZ';
+    this.lampPivot.rotation.order = 'YXZ';
+    if (this.acts.swing) { this.acts.swing.setLoop(THREE.LoopOnce); this.acts.swing.clampWhenFinished = true; }
+    if (this.acts.jump) { this.acts.jump.setLoop(THREE.LoopOnce); this.acts.jump.clampWhenFinished = true; }
     // the bag on his back, from the 2D art: empty (flat, no glow), half-full and full; one is shown at a time
     this.bags = {};
     for (const [k, h] of [['empty', 0.46], ['half', 0.5], ['full', 0.56]]) {
@@ -372,7 +375,7 @@ class Game {
   setAnim(name, fade = 0.28) {
     if (this.anim === name || !this.acts[name]) return;
     const next = this.acts[name], prev = this.anim && this.acts[this.anim];
-    next.reset(); next.setEffectiveWeight(1); next.play();
+    next.reset(); next.setEffectiveWeight(1); next.timeScale = 1; next.play();
     if (prev) prev.crossFadeTo(next, fade, false);
     this.anim = name;
   }
@@ -668,7 +671,7 @@ class Game {
     const straight = disp / Math.max(disp, len);
     const t = clamp((align * straight - S.sloppyAt) / (S.cleanAt - S.sloppyAt), 0, 1);
     const swingsNeeded = S.sloppySwings - t * (S.sloppySwings - S.cleanSwings);
-    n.hp -= 1 / swingsNeeded; n.flash = 0.12; this.swingT = 0.67;
+    n.hp -= 1 / swingsNeeded; n.flash = 0.12; this.swingT = V.swingSeconds; this.swingStart = true;
     Sound.tick();
     this.burst(t >= 1 ? 16 : 7, n.x, n.y, n.z);
     this.float(n.x, n.y - n.r - 10, n.z, t >= 1 ? 'clean' : t > 0.5 ? 'rough' : 'sloppy');
@@ -750,33 +753,53 @@ class Game {
     const z = this.mode === 'ladder' ? zb + T * 0.45 + H * 0.16 : this.mining ? zb + V.depth * 0.62 : 0;
     g.position.set(this.mx, -this.my, THREE.MathUtils.lerp(g.position.z, z, Math.min(1, real * 10)));
     let yaw = this.facing > 0 ? -0.45 : Math.PI + 0.45;
-    if (this.mode === 'ladder') yaw = Math.PI / 2;
+    if (this.mode === 'ladder') yaw = -Math.PI / 2;   // facing you: Mixamo's ladder clip itself turns him to face the ladder
     if (this.mining) yaw = this.facing > 0 ? -0.15 : Math.PI + 0.15;
     g.rotation.y += (((yaw - g.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, real * V.turnRate);
     g.rotation.z = this.stun > 0 ? Math.sin(this.clock * 7) * 0.1 : 0;
     this.swingT = Math.max(0, this.swingT - dt);
     const sp = this.speeds();
-    if (this.mining || this.swingT > 0) { this.setAnim('swing', 0.1); this.acts.swing.timeScale = this.swingT > 0 ? 1.5 : 0; if (!this.swingT) this.acts.swing.time = 0; }
-    else if (this.mode === 'ladder' && this.climbV > 0) this.setAnim('slide', 0.12);   // sliding down: grip the rails, no stepping
-    else if (this.mode === 'ladder') { this.setAnim('climb', 0.12); this.acts.climb.timeScale = -this.climbV / V.climbStride; }   // still on the rungs: paused
-    else if (this.mode === 'air' && !this.falling) { this.setAnim('walk'); this.acts.walk.timeScale = 0.3; }
-    else if (this.moving) { this.setAnim('walk'); this.acts.walk.timeScale = sp.walk / 46; }
+    const dur = (k) => this.acts[k] ? this.acts[k].getClip().duration : 1;
+    if (this.mining || this.swingT > 0) {   // a swing plays the whole strike once; between swings he stands ready
+      this.setAnim('swing', 0.15);
+      const a = this.acts.swing;
+      if (this.swingStart) { a.reset(); a.play(); this.swingStart = false; }
+      a.timeScale = this.swingT > 0 ? dur('swing') / V.swingSeconds : 0;
+      if (!this.swingT) a.time = 0;
+    }
+    else if (this.mode === 'ladder') {   // climbing up plays the climb; sliding down plays it backward, faster; still = paused
+      this.setAnim('climb', 0.2);
+      this.acts.climb.timeScale = clamp(-this.climbV * dur('climb') / V.climbStride, -2.2, 2.2);
+    }
+    else if (this.mode === 'air' && !this.falling) {
+      if (this.anim !== 'jump') { this.setAnim('jump', 0.1); this.acts.jump.time = V.jumpFrom; }
+      this.acts.jump.timeScale = V.jumpRate;
+    }
+    else if (this.moving) { this.setAnim('walk', 0.25); this.acts.walk.timeScale = sp.walk * dur('walk') / V.walkStride; }
     else this.setAnim('idle');
     this.mixer.update(real * Math.max(1, this.speed));
     // the skeleton as this frame's animation left it, for the pick, the bag and the lantern hook
     g.updateMatrixWorld(true);
     const at = (bone) => { const p = new THREE.Vector3(); bone.getWorldPosition(p); return g.worldToLocal(p); };
+    // which way his body really faces (a clip can turn him, as the ladder climb does): from his shoulders
+    const up = new THREE.Vector3(0, 1, 0), face = new THREE.Vector3(1, 0, 0);
+    if (this.bones.lsh && this.bones.rsh) { face.subVectors(at(this.bones.lsh), at(this.bones.rsh)).cross(up); face.y = 0; if (face.lengthSq() > 1e-6) face.normalize(); else face.set(1, 0, 0); }
+    const right = new THREE.Vector3().crossVectors(face, up), bodyYaw = Math.atan2(-face.z, face.x);
     if (this.pick && this.bones.hand && this.bones.elbow) {
       this.pick.visible = !!(this.mining || this.swingT > 0);
-      const hand = at(this.bones.hand), elbow = at(this.bones.elbow);
-      const y = hand.clone().sub(elbow).normalize(), side = new THREE.Vector3(0, 0, 1);
-      const x = new THREE.Vector3().crossVectors(side, y).normalize(), z = new THREE.Vector3().crossVectors(x, y);
-      this.pick.matrix.makeBasis(x, y, z).setPosition(hand.addScaledVector(y, -H * 0.03));
+      // held in his right fist: the handle runs through the fist (the hand bone's -Z in Mixamo's rig), the grip in the
+      // middle of the fist (a little along his fingers, the bone's +Y)
+      const hand = at(this.bones.hand), hq = new THREE.Quaternion(), rq = new THREE.Quaternion();
+      this.bones.hand.getWorldQuaternion(hq); g.getWorldQuaternion(rq); hq.premultiply(rq.invert());
+      const y = new THREE.Vector3(0, 0, -1).applyQuaternion(hq), fingers = new THREE.Vector3(0, 1, 0).applyQuaternion(hq);
+      const x = new THREE.Vector3().crossVectors(right, y); if (x.lengthSq() < 1e-4) x.copy(fingers); x.normalize();
+      const z = new THREE.Vector3().crossVectors(x, y);
+      this.pick.matrix.makeBasis(x, y, z).setPosition(hand.addScaledVector(fingers, H * 0.035));
       this.pick.matrixWorldNeedsUpdate = true;
     }
     if (this.bones.chest) {   // the bag hangs from his shoulders, against his back, leaning with him
       const c = at(this.bones.chest);
-      for (const k in this.bags) { const b = this.bags[k]; b.position.set(c.x - H * V.bagBack, c.y + H * 0.1, c.z - H * 0.02); b.rotation.set(this.bagRoll || 0, 0, -0.1 + (this.bagAng || 0)); }
+      for (const k in this.bags) { const b = this.bags[k]; b.position.copy(c).addScaledVector(face, -H * V.bagBack).addScaledVector(up, H * 0.1); b.rotation.set(this.bagRoll || 0, bodyYaw, -0.1 + (this.bagAng || 0)); }
     }
     // the bag on his back: flat at 0, half-full from 1, full from bagFullAt; its ore glows only with ore in it
     const bw = this.bagWeight(), fill = Math.min(1, bw / S.bagCapacity), hasOre = this.bag.length > 0;
@@ -789,7 +812,8 @@ class Game {
     // the belt lantern: the hook follows his hips; the lantern swings like a pendulum when he speeds up, stops or turns
     if (this.hips) {
       const hp = new THREE.Vector3(); this.hips.getWorldPosition(hp); g.worldToLocal(hp);
-      this.lampPivot.position.set(hp.x + H * V.lampHook[0], hp.y + H * V.lampHook[1], hp.z + H * V.lampHook[2]);
+      this.lampPivot.position.copy(hp).addScaledVector(face, H * V.lampHook[0]).addScaledVector(up, H * V.lampHook[1]).addScaledVector(right, H * V.lampHook[2]);
+      this.lampPivot.rotation.y = bodyYaw;
     }
     const vx = this.lastMx == null || real <= 0 ? 0 : (this.mx - this.lastMx) / real; this.lastMx = this.mx;
     const fwd = vx * this.facing, step = this.moving ? Math.sin((this.walkDist / V.walkStride) * Math.PI * 2) * 0.09 : 0;
