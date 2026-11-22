@@ -8,6 +8,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 const S = window.SETTINGS, RULES = window.RULES, MineGen = window.MineGen3, { Economy, Purse } = window.Economy3;
 const TEST = new URLSearchParams(location.search).has('test');
+const TOUCH = matchMedia('(pointer: coarse)').matches;   // a phone or tablet: tap to go, swipe to mine
 // online: the shared shaft on the server (?online on the server's own address, or ?server=wss://host/ws)
 const QS = new URLSearchParams(location.search);
 const ONLINE = QS.get('server') || (QS.has('online') ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws' : null);
@@ -25,6 +26,7 @@ const V = {
   depth: 2.3 * T,            // how deep the tunnels go into the rock, front to back
   viewHeight: S.minerHeight / S.minerScreenShare,   // world units the camera shows top to bottom, as in 2D
   fov: 32, tilt: 0.07,       // camera: field of view, and a slight look down
+  viewWidthPortrait: 240,    // world units across on a tall screen (7.5 tiles), so the tunnel ahead shows
   lampIntensity: 120, lampDistance: S.lightRadius * T * 2.6, lampDecay: 1, lampOffset: [0, 18, 42],
   lampFill: 0.45,            // share of the lamp's light that casts no shadow (softens his shadow)
   lampColor: 0xffc890,       // an oil flame: warm, but closer to white than to yellow
@@ -171,7 +173,7 @@ class Game {
     window.blockmine3d = this;
     this.A = assets;
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+    this.renderer.setPixelRatio(Math.min(TOUCH ? 1.5 : 2, window.devicePixelRatio));   // phones: a little softer, much faster
     this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.4;
     $('game').appendChild(this.renderer.domElement);
@@ -181,7 +183,7 @@ class Game {
     this.scene.add(new THREE.HemisphereLight(0x8a93a8, 0x2a2018, V.ambient));
     const moon = new THREE.DirectionalLight(0x9fb0d0, V.moon); moon.position.set(-300, 600, 400); this.scene.add(moon);
     this.lampLight = new THREE.PointLight(V.lampColor, V.lampIntensity, V.lampDistance, V.lampDecay);
-    this.lampLight.castShadow = true; this.lampLight.shadow.mapSize.set(1024, 1024); this.lampLight.shadow.bias = -0.002; this.lampLight.shadow.camera.near = 2;
+    this.lampLight.castShadow = true; this.lampLight.shadow.mapSize.set(TOUCH ? 512 : 1024, TOUCH ? 512 : 1024); this.lampLight.shadow.bias = -0.002; this.lampLight.shadow.camera.near = 2;
     this.scene.add(this.lampLight);
     this.lampFill = new THREE.PointLight(V.lampColor, V.lampIntensity * V.lampFill, V.lampDistance, V.lampDecay); this.scene.add(this.lampFill);
 
@@ -202,6 +204,7 @@ class Game {
     window.addEventListener('pointerup', (e) => this.up(e)); window.addEventListener('pointercancel', (e) => this.up(e));
     window.addEventListener('resize', () => this.fit()); this.fit();
     this.bindHud();
+    if (TOUCH && innerHeight > innerWidth) { let seen = false; try { seen = localStorage.getItem('blockmine3d.turnHint') === '1'; localStorage.setItem('blockmine3d.turnHint', '1'); } catch (e) {} if (!seen) setTimeout(() => this.say('Tip: turn your phone sideways for a wider view of the mine.', 5), 4000); }
     this.prev = performance.now();
     this.renderer.setAnimationLoop((t) => this.frame(t));
     if (ONLINE) this.net = new Net(this, ONLINE); else startChain(TEST, (b) => this.onBlock(b), (s) => this.onStatus(s));
@@ -212,7 +215,8 @@ class Game {
     const W = window.innerWidth, H = window.innerHeight;
     this.renderer.setSize(W, H); this.camera.aspect = W / H;
     // as in 2D: he fills about a fifth of the height, but at least viewWidthMin world units show across
-    const viewH = Math.max(V.viewHeight, S.viewWidthMin * 1.0 / this.camera.aspect);
+    const minWide = this.camera.aspect < 1 ? V.viewWidthPortrait : S.viewWidthMin;   // portrait: more of the tunnel across
+    const viewH = Math.max(V.viewHeight, minWide / this.camera.aspect);
     this.camDist = viewH / 2 / Math.tan(THREE.MathUtils.degToRad(V.fov / 2));
     this.camera.updateProjectionMatrix();
   }
@@ -584,6 +588,7 @@ class Game {
 
   // ---------- where the miner is (as in 2D) ----------
   toSurface() {
+    this.goal = null; if (this.goalMark) this.goalMark.visible = false;
     const m = this.mine;
     this.mode = 'ground'; this.lvl = -1; this.ladderK = null; this.falling = null; this.stun = 0; this.pitReturn = null;
     this.mx = m.G.colX(m.c0) - S.waitOffset * T; this.my = 0; this.vx = this.vy = 0; this.mining = null;
@@ -707,8 +712,12 @@ class Game {
       return;
     }
     const cf = this.climbFactor(), onLadder = this.mode === 'ladder';
-    const left = this.keys.left || (!onLadder && this.pad.left), right = this.keys.right || (!onLadder && this.pad.right);
-    const up = this.keys.up || (onLadder && this.pad.left), down = this.keys.down || (onLadder && this.pad.right);
+    const k = this.keys, manual = k.left || k.right || k.up || k.down || this.pad.left || this.pad.right || press.jump;
+    if (manual && this.goal) { this.goal = null; this.markGoal(); }
+    const ap = manual ? null : this.autopilot() || {};
+    const left = k.left || (!onLadder && this.pad.left) || ap.dir < 0, right = k.right || (!onLadder && this.pad.right) || ap.dir > 0;
+    const up = k.up || (onLadder && this.pad.left) || !!ap.up, down = k.down || (onLadder && this.pad.right) || !!ap.down;
+    if (ap.jump) press.jump = true;
     const dir = (right ? 1 : 0) - (left ? 1 : 0);
     if (press.action) this.action();
     if (this.mode === 'ground') {
@@ -722,14 +731,14 @@ class Game {
       if (dir && !this.mining) {
         this.facing = dir;
         const want = this.mx + dir * S.runSpeed * dt, nx = clamp(this.blockRubble(this.lvl, this.mx, want, fy), x0, x1);
-        if (Math.abs(nx - want) > 1e-6 && nx === this.blockRubble(this.lvl, this.mx, want, fy) && performance.now() > (this.rubbleHintAt || 0)) {
+        if (!this.goal && Math.abs(nx - want) > 1e-6 && nx === this.blockRubble(this.lvl, this.mx, want, fy) && performance.now() > (this.rubbleHintAt || 0)) {
           this.say('Rubble in the way. Jump over it.', 2); this.rubbleHintAt = performance.now() + 4000;
         }
         this.moving = Math.abs(nx - this.mx) > 1e-3; this.walkDist += Math.abs(nx - this.mx); this.mx = nx;
       }
       const gap = this.terrainAt(this.lvl, this.mx, 'gap');
       if (gap) this.startFall('gap', 0, gap);
-      else if (this.moving && !(this.gapHintAt > performance.now())) {
+      else if (this.moving && !this.goal && !(this.gapHintAt > performance.now())) {   // no hint while tap-to-go jumps it for him
         const ahead = this.terrainAt(this.lvl, this.mx + this.facing * 1.6 * T, 'gap');
         if (ahead) { this.say('A hole in the floor. Jump over it.', 2); this.gapHintAt = performance.now() + 4000; }
       }
@@ -772,7 +781,9 @@ class Game {
   }
   down(e) {
     Sound.unlock();
-    if (this.overlay || this.paused || !this.mine || !this.mining) return;
+    if (this.overlay || this.paused || !this.mine) return;
+    this.tapStart = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+    if (!this.mining) return;
     const w = this.worldAt(e, this.mining.z);
     if (Math.hypot(w.x - this.mining.x, w.y - this.mining.y) <= this.mining.r * S.nodeTouchSlop * 1.6) {
       this.drag = { id: e.pointerId, node: this.mining, x0: w.x, y0: w.y, x: w.x, y: w.y, len: 0 };
@@ -784,11 +795,97 @@ class Game {
     d.len += Math.hypot(w.x - d.x, w.y - d.y); d.x = w.x; d.y = w.y;
   }
   up(e) {
-    const d = this.drag; if (!d || d.id !== e.pointerId) return;
+    const ts = this.tapStart; this.tapStart = null;
+    const isTap = ts && ts.id === e.pointerId && Math.hypot(e.clientX - ts.x, e.clientY - ts.y) < 14 && performance.now() - ts.t < 450;
+    const d = this.drag;
+    if (isTap) { this.drag = null; this.tap(e); return; }
+    if (!d || d.id !== e.pointerId) return;
     this.drag = null;
     const dx = d.x - d.x0, dy = d.y - d.y0, disp = Math.hypot(dx, dy);
     if (disp < S.swingMinLength || this.mining !== d.node || !this.nodes.includes(d.node)) return;
     this.swing(d.node, dx, dy, disp, d.len);
+  }
+  // ---------- tap to go: tap a place, a ladder or an ore pile; he walks there, takes the ladders and jumps what is in the way ----------
+  tap(e) {
+    if (this.overlay || this.paused || !this.mine || this.stun > 0) return;
+    const m = this.mine, G = m.G, w = this.worldAt(e, 0);
+    // an ore pile he can see: go and stand by it, ready to mine (a tap on the pile he is already working does nothing)
+    for (const n of this.nodes) {
+      const q = this.worldAt(e, n.z);
+      if (Math.hypot(q.x - n.x, q.y - n.y) <= n.r * 1.7 + 6) { if (this.mining === n) return; this.mining = null; this.goTo(n.l, n.standX, n); return; }
+    }
+    this.mining = null;
+    // a ladder: one that goes up from where he is takes him all the way to the hatch; one going down, a level down
+    const here = this.mode === 'ladder' ? m.ladders[this.ladderK].bottom : this.lvl;
+    for (const d of m.ladders) {
+      const cx = G.colX(d.c), y0 = G.floorY(d.top) - S.minerHeight, y1 = G.floorY(d.bottom);
+      if (Math.abs(w.x - cx) > T * 0.75 || w.y < y0 || w.y > y1) continue;
+      if (d.top < here) { this.goHome(); return; }
+      this.goTo(d.bottom, cx + (cx > G.colX(m.c0) ? -1 : 1) * T * 0.8); return;
+    }
+    // a place: the tunnel floor nearest the tap (above the surface means the surface)
+    let l = -1;
+    if (w.y > T) {
+      let best = Infinity;
+      for (let k = 0; k < m.levels.length; k++) { const dy = Math.abs(w.y - (G.floorY(k) - S.tunnelHeight * T * 0.4)); if (dy < best) { best = dy; l = k; } }
+    }
+    if (l < 0) return this.goHome();
+    const [x0, x1] = MineGen.span(m, l);
+    this.goTo(l, clamp(w.x, x0, x1));
+  }
+  goTo(l, x, node) {
+    this.goal = { l, x, node: node || null };
+    this.markGoal();
+  }
+  goHome() { const m = this.mine; this.goTo(-1, m.G.colX(m.c0) - S.waitOffset * T); }
+  markGoal() {
+    if (!this.goalMark) { this.goalMark = this.glowSprite(0xffd28a, 26, 0.75); this.goalMark.material.depthTest = false; this.goalMark.renderOrder = 12; this.scene.add(this.goalMark); }
+    const g = this.goal; this.goalMark.visible = !!g;
+    if (g) this.goalMark.position.set(g.x, -(this.mine.G.floorY(g.l) - 4), V.depth * 0.25);
+  }
+  // what the autopilot presses this step: {dir, up, down, jump}, or null
+  autopilot() {
+    const g = this.goal, m = this.mine;
+    if (!g || this.mining || this.stun > 0 || !m) return null;
+    const G = m.G;
+    if (this.mode === 'ladder') { const d = m.ladders[this.ladderK]; return g.l >= d.bottom ? { down: true } : { up: true }; }
+    if (this.mode !== 'ground') return null;
+    let tx;
+    if (g.l === this.lvl) {
+      tx = g.x;
+      if (Math.abs(tx - this.mx) < 3) {   // there
+        const n = g.node; this.goal = null; this.markGoal();
+        if (n && this.nodes.includes(n)) this.startMining(n);
+        return null;
+      }
+    } else {
+      const down = g.l > this.lvl;
+      let k = -1, bd = Infinity;
+      m.ladders.forEach((d, i) => { if ((down ? d.top : d.bottom) !== this.lvl) return; const dd = Math.abs(G.colX(d.c) - this.mx); if (dd < bd) { bd = dd; k = i; } });
+      if (k < 0) { this.goal = null; this.markGoal(); return null; }
+      tx = G.colX(m.ladders[k].c);
+      if (Math.abs(tx - this.mx) <= S.grabRange * T * 0.8) {
+        if (down && this.lvl === -1 && !this.lampLit) {   // the hatch: light a lamp first (online, the server lets him in)
+          if (performance.now() < (this.enterAt || 0)) return null;
+          this.enterAt = performance.now() + 2000;
+          this.action();
+          if (this.mode !== 'ladder' && !this.net) { this.goal = null; this.markGoal(); }
+          if (this.hatch !== 'open' || this.purse.lamps < 1) { this.goal = null; this.markGoal(); }
+          return null;
+        }
+        this.mode = 'ladder'; this.ladderK = k; this.mx = tx; return null;
+      }
+    }
+    const dir = Math.sign(tx - this.mx), ahead = this.mx + dir * 5;
+    // a hole or rubble right ahead: jump it
+    if (this.terrainAt(this.lvl, ahead, 'gap') || this.terrainAt(this.lvl, ahead, 'rubble')) return { dir, jump: true };
+    return { dir };
+  }
+  startMining(n) {
+    if (this.bagWeight() + n.weight > RULES.bagCapacity + 1e-9) { this.say('Your bag is full. Drop ore or go up.', 2.5); return; }
+    this.mx = n.standX; this.mining = n; this.facing = n.x < this.mx ? -1 : 1;
+    if (this.net) this.net.send({ t: 'pick', id: n.id });
+    this.say(TOUCH ? 'Swipe along the crack to swing' : 'Drag along the crack to swing', 2);
   }
   swing(n, dx, dy, disp, len) {
     const align = Math.abs(Math.cos(Math.atan2(dy, dx) - n.crack));
@@ -1072,7 +1169,7 @@ class Game {
     cam.position.x += (tx - cam.position.x) * k; cam.position.y += (ty + this.camDist * V.tilt - cam.position.y) * k; cam.position.z = this.camDist;
     cam.lookAt(cam.position.x + (Math.random() - 0.5) * sh, cam.position.y - this.camDist * V.tilt + (Math.random() - 0.5) * sh, 0);
     // the E prompt above his head, and the phone buttons
-    const tg = this.target(), pr = $('prompt'), show = !!tg && !this.overlay;
+    const tg = this.target(), pr = $('prompt'), show = !!tg && !this.overlay && !TOUCH;   // the key hint is for keyboards; on a phone you tap
     pr.style.display = show ? 'flex' : 'none';
     if (show) {
       const p = this.screen(this.mx, this.my - H * 1.15, 0); pr.style.left = p.x + 'px'; pr.style.top = p.y + 'px';
