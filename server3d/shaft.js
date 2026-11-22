@@ -28,6 +28,7 @@ class Shaft {
     this.players = new Map();       // token -> player (kept while the server runs; the purse is stored)
     this.conns = new Set();
     this.mine = null; this.hatch = 'waiting'; this.block = null; this.prev = null;
+    this.vaultLog = []; this.vaultSeq = 0;   // what flowed in and out of the Vault, for everyone's screen
     this.clock = 0; this.stats = { blocks: 0, caught: 0, banked: 0, rejectedMoves: 0, msgs: 0, tickMs: 0, tickMax: 0 };
   }
 
@@ -124,6 +125,7 @@ class Shaft {
     if (item === 'kit') ok = p.purse.buyKit(this.eco);
     else if (item === 'lamp') ok = p.purse.buyLamp(this.eco);
     else if (item === 'oil') ok = !p.shift && p.oil < R.oilMaxMeasures && p.purse.buyOil(this.eco, 1) && ++p.oil > 0;
+    if (ok) this.vaultEvent('in', (item === 'kit' ? R.kitPrice : item === 'lamp' ? R.lampPrice : R.oilPrice) * R.salesTo.vault);
     p.conn.send({ t: 'purse', ok, item, purse: p.purse.toJSON(), oil: p.oil });
     if (ok) { this.savePlayer(p); this.dirty = true; }
   }
@@ -233,6 +235,7 @@ class Shaft {
     const it = p.bag.pop(); if (!it) return;
     if (it.kind === 'vault') { this.returnVault(); p.conn.send({ t: 'say', text: 'The Vault piece went back to the Vault.' }); p.conn.send({ t: 'bag', bag: p.bag }); return; }
     const value = it.kind === 'amber' && !it.dropped ? this.eco.dropped(it.value) : it.value;
+    if (it.kind === 'amber' && !it.dropped) this.vaultEvent('in', it.value - value);
     if (p.place.k === undefined && p.place.l >= 0) {
       const T0 = Math.floor(p.place.x / T);
       const n = MineGen.makeNode(this.mine, Math.random, p.place.l, it.kind, value, { within: { a: T0 - 1, b: T0 + 1 } });
@@ -246,7 +249,9 @@ class Shaft {
   // ---------- the end of a shift ----------
   bank(p) {
     const sats = this.sats(p), piece = p.bag.some((it) => it.kind === 'vault');
-    const kept = this.eco.carriedOut(sats, piece ? this.eco.vaultPieceValue() : 0);
+    const pieceValue = piece ? this.eco.vaultPieceValue() : 0;
+    const kept = this.eco.carriedOut(sats, pieceValue);
+    if (piece) this.vaultEvent('out', pieceValue, p.name);
     p.purse.points += kept; p.shift = false; p.oil = 0; p.mining = null;
     const bag = p.bag; p.bag = []; this.stats.banked++;
     p.conn && p.conn.send({ t: 'banked', kept, piece, bag, purse: p.purse.toJSON() });
@@ -254,7 +259,7 @@ class Shaft {
   }
   caught(p) {
     const sats = this.sats(p);
-    this.eco.caught(sats);
+    this.eco.caught(sats); this.vaultEvent('knock', Math.min(sats, this.eco.pot) * R.caughtTo.vault);
     if (p.bag.some((it) => it.kind === 'vault')) this.returnVault();
     if (p.mining) { p.mining.n.miner = null; p.mining = null; }
     p.bag = []; p.shift = false; p.oil = 0; this.stats.caught++;
@@ -283,6 +288,15 @@ class Shaft {
   }
   sendState(p) {
     const m = this.mine, out = { t: 'state', hatch: this.hatch, shift: p.shift, light: this.lightTiles(p) };
+    // the Vault: its amount, and what flowed since this miner's last look (merged knock events go as one surge)
+    out.vault = Math.floor(this.eco.vault);
+    if (p.vaultSeen === undefined) p.vaultSeen = this.vaultSeq;
+    if (this.vaultSeq > p.vaultSeen) {
+      const ev = this.vaultLog.filter((e) => e.n > p.vaultSeen), knock = ev.filter((e) => e.k === 'knock').reduce((x, e) => x + e.a, 0);
+      out.vev = ev.filter((e) => e.k !== 'knock').slice(-20).map((e) => ({ k: e.k, a: e.a, who: e.who }));
+      if (knock) out.vev.push({ k: 'knock', a: knock });
+      p.vaultSeen = this.vaultSeq;
+    }
     if (m) {
       // ore: what his own lamp shows, once; a faint glimmer (no kind, no value) a little further out; never the Vault's glimmer
       const add = [], glim = [], gone = [];
@@ -322,6 +336,11 @@ class Shaft {
       if (sendFar) { out.far = far; p.farT = this.clock; }
     }
     p.conn.send(out);
+  }
+  vaultEvent(k, a, who) {   // small trickles add up until they make a whole sat
+    if (!(a > 0)) return;
+    if (k === 'in') { this.vaultAcc = (this.vaultAcc || 0) + a; if (this.vaultAcc < 1) return; a = Math.floor(this.vaultAcc); this.vaultAcc -= a; }
+    this.vaultLog.push({ n: ++this.vaultSeq, k, a: Math.round(a), who }); if (this.vaultLog.length > 300) this.vaultLog.shift();
   }
   broadcast(msg) { for (const c of this.conns) if (c.player) c.send(msg); }
 
