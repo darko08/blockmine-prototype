@@ -780,9 +780,10 @@ class Game {
       if (end) { this.vaultMon.remove(q.s); q.s.material.map.dispose(); q.s.material.dispose(); if (!q.down) { this.vs.shown += q.carry; if (q.carry) this.vs.flash = Math.min(1, this.vs.flash + 0.12); } return false; }
       const at = this.porterAt(q.d), dir = (q.down ? -1 : 1) * Math.sign(at.dx || 1);
       const climbing = at.onStairs && !q.down, frame = q.rest > 0 ? 16 : (climbing ? 8 : 0) + (Math.floor(q.stride * 8) % 8);
-      if (frame !== q.frame) { q.frame = frame; q.s.material.map.offset.x = frame / this.porterFrames; }
+      // facing: a sprite ignores a negative scale, so he turns by reading his pose mirrored from the strip
+      const key = frame * (dir < 0 ? -1 : 1) - (dir < 0 ? 1 : 0);
+      if (key !== q.frame) { q.frame = key; const m = q.s.material.map; m.repeat.x = (dir < 0 ? -1 : 1) / this.porterFrames; m.offset.x = (frame + (dir < 0 ? 1 : 0)) / this.porterFrames; }
       q.s.position.copy(at.p);
-      q.s.scale.x = Math.abs(q.s.scale.x) * (dir < 0 ? -1 : 1);
       const fadeIn = Math.min(1, (q.down ? this.porterTotal - q.d : q.d) / (this.porterTotal * 0.04)), fadeOut = Math.min(1, (q.down ? q.d : this.porterTotal - q.d) / (this.porterTotal * 0.03));
       q.s.material.opacity = Math.min(fadeIn, fadeOut) * (up ? 1 : 0);
       return true;
