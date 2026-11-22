@@ -33,7 +33,7 @@ const V = {
   timberEvery: 5.5 * T,      // spacing of timber sets along a tunnel (zones 1-3)
   pickScale: 0.42,           // pickaxe length as a share of his height
   amberEmissive: [0.35, 0.55, 0.8, 1.1],    // amber (the sats) glows more the deeper it lies
-  humRange: 900,             // world units: the hum of the Deep is heard this far from the Vault, louder closer
+  humRange: 900, music: false,             // world units: the hum of the Deep is heard this far from the Vault, louder closer
   lampSize: 0.16,            // the belt lantern's height, handle included, as a share of his height
   lampHook: [0.04, 0.02, 0.15],   // the belt hook, from his hips: forward, up, to his right (shares of his height)
   turnRate: 7,               // how quickly he turns to face a new way (higher = snappier)
@@ -429,9 +429,13 @@ class Game {
     this.blockInfo = { height: b.height, arrivedAt: b.arrivedAt || Date.now(), prevOpenMs: b.prevOpenMs };
     if (b.initial || !this.mine) { this.openMine(b, false); return; }
     if (b.missed) {
-      if (this.below()) { this.toSurface(); this.bank(); }
+      let lostBag = false;
+      if (this.below()) {   // brought up, but not paid: going offline must never be a free way out
+        lostBag = this.bag.length > 0;
+        this.bag = []; this.inShift = false; this.lampLit = false; this.oilLeft = 0; this.drag = null; this.toSurface();
+      }
       this.openMine(b, true);
-      this.say('Feed back. A block came while it was down; you were brought up safely.', 6);
+      this.say('Feed back. A block came while it was down; you were brought up' + (lostBag ? ', and your bag went back to the mine.' : '.'), 6);
       return;
     }
     Sound.knock(); this.shake = 0.45;
@@ -621,6 +625,7 @@ class Game {
     const m = this.mine, best = tg.k;
     if (m.ladders[best].top === -1 && this.lvl === -1 && this.hatch !== 'open') { this.say('The hatch is shut.', 2); return; }
     if (m.ladders[best].top === -1 && this.lvl === -1 && !this.lampLit) {   // one lamp is one shift: light one to go down
+      this.freshMoney();
       if (this.purse.lamps < 1) { this.say(this.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.', 3); this.openShop(); return; }
       this.purse.lamps -= 1; this.lampLit = true; this.saveMoney();
       this.say('Lamp lit for this shift' + (this.oilLeft ? ' · ' + this.oilLeft + ' measure' + (this.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
@@ -747,6 +752,7 @@ class Game {
   }
 
   caught() {   // the knock: the lamp and the bag are lost for good
+    this.freshMoney();
     const amber = this.bagSats();
     this.eco.caught(amber); this.saveMoney();
     const hadVault = this.bag.some((p) => p.kind === 'vault');
@@ -756,6 +762,7 @@ class Game {
     this.showOverlay('The deep is closed', 'The knock came before you reached the hatch. Your lamp and your bag (' + fmt(amber) + ' sats carried) are lost' + (hadVault ? ', and the Vault piece went back to the Vault' : '') + '.');
   }
   bank() {   // past the hatch, the bag is his: the miner keeps 90% of the amber, the studio 10%
+    this.freshMoney();
     const sats = this.bagSats(), mins = this.bagMinerals(), r = records.get(), vaultPiece = this.bag.some((p) => p.kind === 'vault');
     const pieceValue = vaultPiece ? this.eco.vaultPieceValue() : 0;
     const kept = this.inShift ? this.eco.carriedOut(sats, pieceValue) : 0;
@@ -780,6 +787,7 @@ class Game {
   // The Vault piece is never left lying: dropped, it goes back to the Vault.
   drop() {
     const p = this.bag.pop(); if (!p) return;
+    this.freshMoney();
     Sound.tick();
     if (p.kind === 'vault') { this.returnVault(); this.say('The Vault piece went back to the Vault.', 2.5); return; }
     if (!this.below() || this.mode !== 'ground') { this.say('Dropped ' + (p.kind === 'amber' ? fmt(p.sats) + ' sats' : '1 ' + p.kind) + ' down the shaft.', 1.5); if (p.kind === 'amber') this.eco.dropped(p.sats); this.saveMoney(); return; }
@@ -792,6 +800,9 @@ class Game {
   returnVault() {   // the piece is back where it lay, at the end of its side tunnel on level 15
     const m = this.mine, v = m.vault; if (!v || this.nodes.includes(v)) return;
     v.hp = 1; m.nodes.push(v); this.showNode(v);
+  }
+  freshMoney() {   // another tab may have spent or earned since: always start from what is stored
+    this.eco = Economy(RULES, loadJSON(ECO_KEY)); this.purse = Purse(RULES, loadJSON(PURSE_KEY));
   }
   saveMoney() { saveJSON(ECO_KEY, this.eco.toJSON()); saveJSON(PURSE_KEY, this.purse.toJSON()); }
   bagWeight() { return this.bag.reduce((a, b) => a + b.weight, 0); }
@@ -1009,7 +1020,8 @@ class Game {
     }
     p.needsUpdate = true; this.crackLine.geometry.setDrawRange(0, 66);
   }
-  hum(L) {
+  hum(L) {   // the hum of the Deep: switched off by the owner (no music); set V.music to bring it back
+    if (!V.music) return;
     const v = this.mine && this.mine.vault; if (!v) return;
     const ctx = !Sound.muted() && Sound.unlock && this.humReady ? this.humCtx : null;
     const d = Math.hypot(v.x - L.x, (v.base - 20) - L.y), loud = this.below() ? clamp(1 - d / V.humRange, 0, 1) : 0;
@@ -1061,13 +1073,15 @@ class Game {
     }
     $('drop').onclick = () => this.drop();
     ['shopBtn', 'shopClose', 'buyKit', 'buyLamp', 'buyOil'].forEach((id) => $(id).addEventListener('pointerdown', stop));
-    $('shopBtn').onclick = () => this.openShop();
+    $('shopBtn').onclick = () => { this.freshMoney(); this.openShop(); };
+    window.addEventListener('storage', (e) => { if (e.key === ECO_KEY || e.key === PURSE_KEY) this.freshMoney(); });
     $('shopClose').onclick = () => { $('shop').style.display = 'none'; this.overlay = false; };
-    $('buyKit').onclick = () => { if (this.purse.buyKit(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
-    $('buyLamp').onclick = () => { if (this.purse.buyLamp(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
+    $('buyKit').onclick = () => { this.freshMoney(); if (this.purse.buyKit(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
+    $('buyLamp').onclick = () => { this.freshMoney(); if (this.purse.buyLamp(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
     $('buyOil').onclick = () => {
       if (this.below() || this.lampLit) { this.say('Oil is bought before you go down.', 2); return; }
       if (this.oilLeft >= RULES.oilMaxMeasures) return;
+      this.freshMoney();
       if (this.purse.buyOil(this.eco, 1)) { this.oilLeft += 1; Sound.tick(); this.saveMoney(); }
       this.openShop();
     };
