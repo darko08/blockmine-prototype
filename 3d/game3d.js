@@ -601,9 +601,9 @@ class Game {
   buildVaultShow() {
     const g = this.vaultMon = new THREE.Group(), Wp = V.vaultPaintWidth, Hp = Wp * 1143 / 2048;
     this.vaultDims = { Wp, Hp };
-    const loader = new THREE.TextureLoader(), tex = [1, 2, 3].map((i) => { const t = loader.load('vault/stage' + i + '.webp?v=2'); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = this.renderer.capabilities.getMaxAnisotropy(); return t; });
+    const loader = new THREE.TextureLoader(), tex = [1, 2, 3].map((i) => { const t = loader.load('vault/stage' + i + '.webp?v=3'); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = this.renderer.capabilities.getMaxAnisotropy(); return t; });
     this.vaultPaintMat = new THREE.ShaderMaterial({
-      uniforms: { a: { value: tex[0] }, b: { value: tex[1] }, c: { value: tex[2] }, fill: { value: 1 }, boost: { value: 0 }, t: { value: 0 }, texel: { value: new THREE.Vector2(1 / 2752, 1 / 1536) } },
+      uniforms: { a: { value: tex[0] }, b: { value: tex[1] }, c: { value: tex[2] }, fill: { value: 1 }, boost: { value: 0 }, t: { value: 0 }, texel: { value: new THREE.Vector2(1 / 4096, 1 / 2286) } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
       fragmentShader: `varying vec2 vUv; uniform sampler2D a; uniform sampler2D b; uniform sampler2D c; uniform float fill; uniform float boost; uniform float t; uniform vec2 texel;
         vec3 stage(vec2 uv){ return mix(mix(texture2D(a, uv).rgb, texture2D(b, uv).rgb, clamp(fill, 0.0, 1.0)), texture2D(c, uv).rgb, clamp(fill - 1.0, 0.0, 1.0)); }
@@ -611,7 +611,7 @@ class Game {
           // a light unsharp mask: the painting's edges stay crisp however far it is stretched
           vec3 mid = stage(vUv);
           vec3 around = (stage(vUv + vec2(texel.x, 0.0)) + stage(vUv - vec2(texel.x, 0.0)) + stage(vUv + vec2(0.0, texel.y)) + stage(vUv - vec2(0.0, texel.y))) * 0.25;
-          vec3 col = clamp(mid + (mid - around) * 0.9, 0.0, 1.0);
+          vec3 col = clamp(mid + (mid - around) * 0.45, 0.0, 1.0);   // the upscaled paintings need only a touch
           float warm = dot(col, vec3(0.6, 0.35, 0.05));   // the gold breathes a little, and flares at the knock or a piece
           col *= 1.0 + boost * 0.9 * smoothstep(0.35, 0.9, warm) + 0.04 * sin(t * 1.7) * smoothstep(0.5, 0.95, warm);
           float edge = smoothstep(0.0, 0.2, vUv.x) * smoothstep(0.0, 0.2, 1.0 - vUv.x) * smoothstep(0.0, 0.04, vUv.y) * smoothstep(0.0, 0.12, 1.0 - vUv.y);
