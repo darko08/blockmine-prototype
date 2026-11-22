@@ -71,6 +71,46 @@ $('mute').addEventListener('pointerdown', (e) => e.stopPropagation());
 $('mute').addEventListener('click', () => { toggleMute(); $('mute').blur(); });
 window.addEventListener('keydown', (e) => { if (e.code === 'KeyM' && !e.repeat) toggleMute(); });
 
+// ---------- music: one scored track per depth band, crossfaded as he goes down (N, or the note button) ----------
+// Levels 1-3, 4-7, 8-12 and 13-15 each have their own loop, darker the deeper. Streamed, not decoded whole, and paused
+// while silent. The M button silences it with everything else; the note button silences only the music.
+const MUSIC_KEY = 'blockmine3d.music';
+const Music = {
+  files: ['music/depth1.mp3', 'music/depth2.mp3', 'music/depth3.mp3', 'music/depth4.mp3'],
+  volume: 0.55, surface: 0.45, fade: 2.5,      // overall level; on the surface the first track plays softer; seconds to cross
+  on: true, tracks: [], tryT: 0,
+  bandOf(l) { return l < 3 ? 0 : l < 7 ? 1 : l < 12 ? 2 : 3; },   // l: the level index (-1 is the surface)
+  track(i) {
+    if (!this.tracks[i]) { const a = new Audio(this.files[i]); a.loop = true; a.preload = 'auto'; a.volume = 0; this.tracks[i] = { a, v: 0 }; }
+    return this.tracks[i];
+  },
+  update(dt, l) {
+    const band = this.bandOf(l), want = this.on && !Sound.muted();
+    this.tryT -= dt;
+    for (let i = 0; i < this.files.length; i++) {
+      const target = want && i === band ? (l < 0 ? this.surface : 1) : 0;
+      if (!target && !this.tracks[i]) continue;
+      const t = this.track(i);
+      t.v += (target - t.v) * Math.min(1, dt / this.fade * 3);
+      if (target === 0 && t.v < 0.005) { t.v = 0; if (!t.a.paused) t.a.pause(); }
+      t.a.volume = Math.max(0, Math.min(1, t.v * this.volume));
+      // browsers start sound only after a tap or a key: keep trying until one has happened
+      if (target > 0 && t.a.paused && this.tryT <= 0) { this.tryT = 1; t.a.play().catch(() => {}); }
+    }
+  },
+};
+const ICON_MUSIC_ON = '<svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="#e0b878" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 23V8L25 5V20"/><circle cx="9" cy="23" r="3" fill="#e0b878" fill-opacity=".35"/><circle cx="22" cy="20" r="3" fill="#e0b878" fill-opacity=".35"/></svg>';
+const ICON_MUSIC_OFF = ICON_MUSIC_ON.replace('</svg>', '<path d="M5 5L27 27"/></svg>');
+function setMusic(on) {
+  Music.on = on; const b = $('musicBtn'); b.innerHTML = on ? ICON_MUSIC_ON : ICON_MUSIC_OFF;
+  b.setAttribute('aria-label', on ? 'Music is on. Turn it off (N)' : 'Music is off. Turn it on (N)'); b.title = on ? 'Music on (N)' : 'Music off (N)';
+}
+function toggleMusic() { setMusic(!Music.on); try { localStorage.setItem(MUSIC_KEY, Music.on ? '1' : '0'); } catch (e) {} }
+{ let on = true; try { on = localStorage.getItem(MUSIC_KEY) !== '0'; } catch (e) {} setMusic(on); }
+$('musicBtn').addEventListener('pointerdown', (e) => e.stopPropagation());
+$('musicBtn').addEventListener('click', toggleMusic);
+window.addEventListener('keydown', (e) => { if (e.code === 'KeyN' && !e.repeat) toggleMusic(); });
+
 const records = Records(TEST, 'cutaway3d');
 const ECO_KEY = 'blockmine3d.economy' + (TEST ? '.test' : ''), PURSE_KEY = 'blockmine3d.purse' + (TEST ? '.test' : '');
 const loadJSON = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
@@ -856,6 +896,7 @@ class Game {
     }
     for (const n of this.nodes) n.flash = Math.max(0, (n.flash || 0) - dt);
     if (this.mine) this.draw(real, dt);
+    if (this.mine) Music.update(real, this.mode === 'ladder' ? this.mine.ladders[this.ladderK].top : this.falling ? this.falling.toLvl : this.lvl);
     if (this.net && this.mine) this.net.frame(real);
     if (this.levelLabels && this.lvl >= 0 && this.levelLabels[this.lvl]) this.levelLabels[this.lvl].visible = true;
     this.hud();
