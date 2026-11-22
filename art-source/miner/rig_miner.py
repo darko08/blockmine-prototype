@@ -56,6 +56,41 @@ bpy.ops.object.select_all(action='DESELECT'); body.select_set(True); rig.select_
 bpy.ops.object.parent_set(type='ARMATURE_AUTO')
 unweighted = [v.index for v in body.data.vertices if not any(g.weight > 1e-3 for g in v.groups)]
 print('UNWEIGHTED', len(unweighted), 'of', len(body.data.vertices))
+def proxy_weights():
+    """Blender's heat weighting fails on the Tripo mesh (it is not watertight). Make a watertight voxel copy, weight that,
+    and copy its weights onto the real mesh, interpolated from the nearest face."""
+    proxy = body.copy(); proxy.data = body.data.copy(); proxy.modifiers.clear(); proxy.parent = None
+    proxy.matrix_world = body.matrix_world.copy(); bpy.context.scene.collection.objects.link(proxy)
+    for vg in list(proxy.vertex_groups): proxy.vertex_groups.remove(vg)
+    bpy.ops.object.select_all(action='DESELECT'); proxy.select_set(True); bpy.context.view_layer.objects.active = proxy
+    m = proxy.modifiers.new('r', 'REMESH'); m.mode = 'VOXEL'; m.voxel_size = H * 0.007; bpy.ops.object.modifier_apply(modifier='r')
+    m = proxy.modifiers.new('d', 'DECIMATE'); m.ratio = min(1, 40000 / max(1, len(proxy.data.polygons))); bpy.ops.object.modifier_apply(modifier='d')
+    bpy.ops.object.select_all(action='DESELECT'); proxy.select_set(True); rig.select_set(True); bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.parent_set(type='ARMATURE_AUTO')
+    bad = sum(1 for v in proxy.data.vertices if not any(g.weight > 1e-3 for g in v.groups))
+    print('PROXY', len(proxy.data.vertices), 'verts,', bad, 'unweighted')
+    if bad > len(proxy.data.vertices) * 0.02:
+        bpy.data.objects.remove(proxy); return False
+    for vg in list(body.vertex_groups): body.vertex_groups.remove(vg)
+    for vg in proxy.vertex_groups: body.vertex_groups.new(name=vg.name)
+    bpy.ops.object.select_all(action='DESELECT'); body.select_set(True); bpy.context.view_layer.objects.active = body
+    dt = body.modifiers.new('w', 'DATA_TRANSFER'); dt.object = proxy; dt.use_vert_data = True
+    dt.data_types_verts = {'VGROUP_WEIGHTS'}; dt.vert_mapping = 'POLYINTERP_NEAREST'
+    dt.layers_vgroup_select_src = 'ALL'; dt.layers_vgroup_select_dst = 'NAME'
+    bpy.ops.object.modifier_move_to_index(modifier='w', index=0)
+    bpy.ops.object.modifier_apply(modifier='w')
+    bpy.data.objects.remove(proxy)
+    # smooth the weights a little so the coat bends softly, and keep at most 4 bones per vertex
+    bpy.ops.object.mode_set(mode='WEIGHT_PAINT')
+    bpy.ops.object.vertex_group_smooth(group_select_mode='ALL', factor=0.5, repeat=3)
+    bpy.ops.object.vertex_group_limit_total(group_select_mode='ALL', limit=4)
+    bpy.ops.object.vertex_group_normalize_all(group_select_mode='ALL', lock_active=False)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    return True
+
+if len(unweighted) > len(body.data.vertices) * 0.01 and proxy_weights():
+    unweighted = [v.index for v in body.data.vertices if not any(g.weight > 1e-3 for g in v.groups)]
+    print('PROXY WEIGHTS used; unweighted now', len(unweighted))
 if len(unweighted) > len(body.data.vertices) * 0.01:
     print('heat weights failed; using nearest-bone weights')
     for vg in list(body.vertex_groups): body.vertex_groups.remove(vg)
@@ -67,7 +102,7 @@ if len(unweighted) > len(body.data.vertices) * 0.01:
         d = sorted((dist(v.co, a, b), n) for n, (a, b) in segs.items())[:2]
         w0, w1 = 1 / (d[0][0] + 1e-4) ** 4, 1 / (d[1][0] + 1e-4) ** 4
         groups[d[0][1]].add([v.index], w0 / (w0 + w1), 'REPLACE'); groups[d[1][1]].add([v.index], w1 / (w0 + w1), 'REPLACE')
-elif unweighted:   # a few stray bits (inside the coat): give them to the nearest weighted neighbour's bones
+if 0 < len(unweighted) <= len(body.data.vertices) * 0.01:   # a few stray bits (inside the coat): give them to the nearest weighted neighbour's bones
     import mathutils
     kd = mathutils.kdtree.KDTree(len(body.data.vertices)); bad = set(unweighted)
     for v in body.data.vertices:
@@ -122,14 +157,15 @@ ACTIONS = {
              (12, merge(arms_down(fwd_l=22, fwd_r=-22), legs(-20, 26, 10, 6), {'spine': [(Y, 4)]})),
              (18, merge(arms_down(fwd_l=0, fwd_r=0), legs(-4, 6, 38, 4), {'spine': [(Y, 4)], '_drop': 0.012})),
              (24, merge(arms_down(fwd_l=-22, fwd_r=22), legs(26, -20, 6, 10), {'spine': [(Y, 4)]}))],
-    # facing the ladder (the page turns his back to the camera); hands reach overhead in turn, knees lift in turn
-    'climb': [(0, merge({'upperarm.L': [(X, 115)], 'upperarm.R': [(X, -35)], 'forearm.L': [(Z, 25)], 'forearm.R': [(Z, -60)]}, legs(45, 0, 75, 10))),
-              (12, merge({'upperarm.L': [(X, 35)], 'upperarm.R': [(X, -115)], 'forearm.L': [(Z, 60)], 'forearm.R': [(Z, -25)]}, legs(0, 45, 10, 75))),
-              (24, merge({'upperarm.L': [(X, 115)], 'upperarm.R': [(X, -35)], 'forearm.L': [(Z, 25)], 'forearm.R': [(Z, -60)]}, legs(45, 0, 75, 10)))],
+    # facing the ladder (the page turns his back to the camera): one hand reaches overhead for the next rung while the
+    # other grips a rung in front of his chest; the knee on the reaching side lifts
+    'climb': [(0, merge({'upperarm.L': [(X, 118)], 'forearm.L': [(Z, 20)]}, {k: v for k, v in arms_down(extra_r=32, fwd_r=-68, elbow_r=70).items() if k.endswith('.R')}, legs(42, 4, 70, 12))),
+              (12, merge({'upperarm.R': [(X, -118)], 'forearm.R': [(Z, -20)]}, {k: v for k, v in arms_down(extra_l=32, fwd_l=-68, elbow_l=70).items() if k.endswith('.L')}, legs(4, 42, 12, 70))),
+              (24, merge({'upperarm.L': [(X, 118)], 'forearm.L': [(Z, 20)]}, {k: v for k, v in arms_down(extra_r=32, fwd_r=-68, elbow_r=70).items() if k.endswith('.R')}, legs(42, 4, 70, 12)))],
     # sliding down a ladder: hands gripping the rails at chest height, knees a little bent, no stepping
-    'slide': [(0, merge(arms_down(extra_l=28, extra_r=28, fwd_l=-62, fwd_r=-62, elbow_l=55, elbow_r=55), legs(18, 14, 30, 26), {'spine': [(Y, 6)]})),
-              (12, merge(arms_down(extra_l=28, extra_r=28, fwd_l=-60, fwd_r=-64, elbow_l=58, elbow_r=52), legs(16, 16, 28, 28), {'spine': [(Y, 6)]})),
-              (24, merge(arms_down(extra_l=28, extra_r=28, fwd_l=-62, fwd_r=-62, elbow_l=55, elbow_r=55), legs(18, 14, 30, 26), {'spine': [(Y, 6)]}))],
+    'slide': [(0, merge(arms_down(extra_l=34, extra_r=34, fwd_l=-78, fwd_r=-78, elbow_l=62, elbow_r=62), legs(18, 14, 30, 26), {'spine': [(Y, 6)]})),
+              (12, merge(arms_down(extra_l=34, extra_r=34, fwd_l=-76, fwd_r=-80, elbow_l=64, elbow_r=60), legs(16, 16, 28, 28), {'spine': [(Y, 6)]})),
+              (24, merge(arms_down(extra_l=34, extra_r=34, fwd_l=-78, fwd_r=-78, elbow_l=62, elbow_r=62), legs(18, 14, 30, 26), {'spine': [(Y, 6)]}))],
     # both hands on the pick: raised overhead, then a strike forward and down
     'swing': [(0, merge({'upperarm.L': [(X, 100)], 'upperarm.R': [(X, -100)], 'forearm.L': [(Z, -60)], 'forearm.R': [(Z, 60)]}, legs(12, -12, 8, 4), {'spine': [(Y, -10)]})),
               (8, merge(arms_down(fwd_l=-65, fwd_r=-65, elbow_l=5, elbow_r=5), legs(12, -12, 14, 4), {'spine': [(Y, 24)]})),
