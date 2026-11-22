@@ -126,6 +126,10 @@ ACTIONS = {
     'climb': [(0, merge({'upperarm.L': [(X, 115)], 'upperarm.R': [(X, -35)], 'forearm.L': [(Z, 25)], 'forearm.R': [(Z, -60)]}, legs(45, 0, 75, 10))),
               (12, merge({'upperarm.L': [(X, 35)], 'upperarm.R': [(X, -115)], 'forearm.L': [(Z, 60)], 'forearm.R': [(Z, -25)]}, legs(0, 45, 10, 75))),
               (24, merge({'upperarm.L': [(X, 115)], 'upperarm.R': [(X, -35)], 'forearm.L': [(Z, 25)], 'forearm.R': [(Z, -60)]}, legs(45, 0, 75, 10)))],
+    # sliding down a ladder: hands gripping the rails at chest height, knees a little bent, no stepping
+    'slide': [(0, merge(arms_down(extra_l=28, extra_r=28, fwd_l=-62, fwd_r=-62, elbow_l=55, elbow_r=55), legs(18, 14, 30, 26), {'spine': [(Y, 6)]})),
+              (12, merge(arms_down(extra_l=28, extra_r=28, fwd_l=-60, fwd_r=-64, elbow_l=58, elbow_r=52), legs(16, 16, 28, 28), {'spine': [(Y, 6)]})),
+              (24, merge(arms_down(extra_l=28, extra_r=28, fwd_l=-62, fwd_r=-62, elbow_l=55, elbow_r=55), legs(18, 14, 30, 26), {'spine': [(Y, 6)]}))],
     # both hands on the pick: raised overhead, then a strike forward and down
     'swing': [(0, merge({'upperarm.L': [(X, 100)], 'upperarm.R': [(X, -100)], 'forearm.L': [(Z, -60)], 'forearm.R': [(Z, 60)]}, legs(12, -12, 8, 4), {'spine': [(Y, -10)]})),
               (8, merge(arms_down(fwd_l=-65, fwd_r=-65, elbow_l=5, elbow_r=5), legs(12, -12, 14, 4), {'spine': [(Y, 24)]})),

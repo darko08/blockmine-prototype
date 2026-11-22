@@ -29,8 +29,13 @@ const V = {
   timberEvery: 5.5 * T,      // spacing of timber sets along a tunnel (zones 1-3)
   pickScale: 0.42,           // pickaxe length as a share of his height
   bitcoinEmissive: [0.35, 0.55, 0.8, 1.1],
+  lampSize: 0.16,            // the belt lantern's height, handle included, as a share of his height
+  lampHook: [0.04, 0.02, 0.15],   // the belt hook, from his hips: forward, up, to his right (shares of his height)
+  pileScale: 1.3,            // 3D deposit piles are this much taller than the 2D pile heights (their base is wide rubble)
+  walkStride: 46,            // world units per walk cycle (as the walk animation is timed)
+  climbStride: 26,           // world units climbed per climbing cycle (two hand-over-hand reaches)
 };
-const MODELS = ['miner', 'ore', 'ore_rich', 'iron', 'silver', 'ladder', 'headframe', 'cart', 'barrel', 'crate', 'lantern', 'pickaxe', 'timber'];
+const MODELS = ['miner', 'dep_bitcoin', 'dep_iron', 'dep_silver', 'dep_amber', 'bag_empty', 'bag_half', 'bag_full', 'ladder', 'headframe', 'cart', 'barrel', 'crate', 'lantern', 'timber'];
 
 // ---------- sound: mute button and M, remembered in this browser (same as the 2D page) ----------
 const MUTE_KEY = 'blockmine.cutaway.muted';
@@ -80,7 +85,7 @@ const loader = new GLTFLoader();
 const texLoader = new THREE.TextureLoader();
 async function loadAll() {
   const models = {};
-  await Promise.all(MODELS.map((n) => new Promise((res) => loader.load('models/' + n + '.glb?v=3', (g) => { models[n] = g; res(); }, undefined, () => res()))));
+  await Promise.all(MODELS.map((n) => new Promise((res) => loader.load('models/' + n + '.glb?v=5', (g) => { models[n] = g; res(); }, undefined, () => res()))));
   const tex = (p) => new Promise((res) => texLoader.load('../' + p + '?v=' + S.artVersion, (t) => {
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; res(t);
   }, undefined, () => res(null)));
@@ -320,7 +325,13 @@ class Game {
     this.anim = null; this.setAnim('idle');
     const H = S.minerHeight;
     // the lantern on his belt: the one lamp
-    if (this.A.models.lantern) { this.beltLamp = place(this.A.models.lantern, H * 0.2, { cast: false }); this.beltLamp.position.set(H * 0.1, H * 0.42, H * 0.17); g.add(this.beltLamp); }
+    // the lantern hangs by its handle from a hook on his belt, at his right hip: it follows his hips and swings a little
+    this.hips = body.getObjectByName('hips');
+    this.lampPivot = new THREE.Group(); g.add(this.lampPivot); this.lampAng = 0; this.lampVel = 0; this.lastMx = null;
+    if (this.A.models.lantern) {
+      this.beltLamp = place(this.A.models.lantern, H * V.lampSize, { cast: false });
+      this.beltLamp.position.y = -H * V.lampSize; this.lampPivot.add(this.beltLamp);
+    }
     this.lampGlow = this.glowSprite(0xff9a30, S.lightRadius * T * 1.5, 0.22); this.scene.add(this.lampGlow);
     // the pick: a wooden handle and an iron head, swung from the shoulder in time with the swing animation
     const wood = fogged(new THREE.MeshStandardMaterial({ color: 0x8a6440, roughness: 0.9 }));
@@ -331,10 +342,16 @@ class Game {
     const head = new THREE.Mesh(new THREE.TorusGeometry(H * 0.17, H * 0.022, 6, 16, Math.PI * 0.75), iron);
     head.position.set(H * 0.56, -H * 0.15, 0); head.rotation.z = Math.PI * 0.12; pivot.add(head);
     for (const m of [handle, head]) m.castShadow = true;
-    // the bag on his back: a sack that is flat and dark when empty, and swells and glows as ore goes in
-    const sack = new THREE.SphereGeometry(1, 20, 14);
-    this.bagMat = fogged(new THREE.MeshStandardMaterial({ color: 0x6b5236, roughness: 1, emissive: 0xff9a30, emissiveIntensity: 0 }));
-    this.bagMesh = new THREE.Mesh(sack, this.bagMat); this.bagMesh.castShadow = true; g.add(this.bagMesh);
+    // the bag on his back, from the 2D art: empty (flat, no glow), half-full and full; one is shown at a time
+    this.bags = {};
+    for (const [k, h] of [['empty', 0.46], ['half', 0.5], ['full', 0.56]]) {
+      const holder = new THREE.Group(), o = place(this.A.models['bag_' + k], H * h, { cloneMat: true });
+      o.rotation.y = -Math.PI / 2 + 0.35;   // its front faces backward, turned a little toward you
+      holder.add(o); holder.position.set(-H * 0.2, H * (0.88 - h), -H * 0.02); holder.visible = false; g.add(holder);
+      holder.userData.mats = []; o.traverse((m) => m.isMesh && holder.userData.mats.push(m.material));
+      if (k !== 'empty') holder.userData.mats.forEach((mt) => { mt.emissive = new THREE.Color(0xffa040); mt.emissiveMap = mt.map; mt.needsUpdate = true; });
+      this.bags[k] = holder;
+    }
     this.bagGlow = this.glowSprite(0xffb547, 30, 0); g.add(this.bagGlow);
   }
   setAnim(name, fade = 0.18) {
@@ -397,26 +414,31 @@ class Game {
     this.say('Block ' + b.height.toLocaleString() + ' · the hatch is open', 4);
   }
 
-  // deposits: amber crystals in the back wall at chest height; Bitcoin ore, iron and silver as piles on the floor
+  // deposits, made from the 2D art: Bitcoin ore, iron and silver as piles on the floor against the back wall (as tall as
+  // the 2D piles), amber crystals growing out of the back wall at chest height
   showNode(n) {
-    const M = this.A.models, zb = -V.depth / 2;
-    const model = { amber: M.ore, bitcoin: M.ore_rich, iron: M.iron || M.ore_rich, silver: M.silver || M.ore_rich }[n.kind];
-    const amber = n.kind === 'amber', h = amber ? n.r * 2.6 : n.h * 1.05;
-    const o = place(model, h, { cloneMat: true });
-    if (amber) { o.rotation.x = Math.PI / 2 * 0.85; o.position.set(n.x, -(n.y + h * 0.5), zb + 2); }   // its crystals face the camera
-    else { o.position.set(n.x, -(n.base - S.pileSink), zb + V.depth * 0.32); o.rotation.y = n.crack - Math.PI / 2; }
-    if (!M.iron && n.kind === 'iron') o.traverse((m) => m.isMesh && m.material.color.set(0x5a4038));
-    if (!M.silver && n.kind === 'silver') o.traverse((m) => m.isMesh && m.material.color.set(0xb8c4d8));
+    const M = this.A.models, zb = -V.depth / 2, amber = n.kind === 'amber';
+    const o = place(M['dep_' + n.kind], amber ? n.r * 3.0 : n.h * V.pileScale, { cloneMat: true });
+    const jit = (n.crack / Math.PI - 0.5) * 0.5;
+    if (amber) {   // the cluster's base against the wall, crystals pointing out and up
+      o.rotation.set(Math.PI * 0.32, jit, 0);
+      o.position.set(n.x, -(n.y + n.r * 1.2), zb + 1);
+    } else {
+      o.rotation.y = jit;
+      o.position.set(n.x, -(n.base - S.pileSink), zb + V.depth * 0.3);
+    }
     n.obj = o; n.mats = []; o.traverse((m) => m.isMesh && n.mats.push(m.material));
-    n.z = o.position.z + (amber ? 4 : V.depth * 0.15);
+    n.z = amber ? zb + n.r * 2 : o.position.z + V.depth * 0.2;
     n.baseScale = o.scale.x;
-    if (n.kind === 'bitcoin') {   // the only deposit that glows, pulses, and glimmers through the fog
-      n.mats.forEach((mt) => { mt.emissive = new THREE.Color(n.rich ? 0xfff0b0 : 0xffa030); mt.emissiveMap = mt.map; });
+    if (n.kind === 'bitcoin') {   // the only deposit that glows, pulses, and glimmers through the fog: its cracks light up
+      n.mats.forEach((mt) => { mt.emissive = new THREE.Color(n.rich ? 0xfff0c0 : 0xffb060); mt.emissiveMap = mt.map; mt.needsUpdate = true; });
       n.glim = this.glowSprite(n.rich ? 0xfff0b0 : 0xff7a20, n.h * 1.4, 0); n.glim.position.set(n.x, -n.y, n.z + 4); n.glim.renderOrder = 10; n.glim.material.depthTest = false;
       this.world.add(n.glim);
-    } else if (n.kind === 'silver') {
-      n.glim = this.glowSprite(0xcfe0ff, n.h * 2.0, 0); n.glim.position.set(n.x, -n.y, n.z + 4); this.world.add(n.glim);
-      n.mats.forEach((mt) => { mt.metalness = 0.6; mt.roughness = 0.35; });
+    } else if (n.kind === 'silver') {   // a faint cold shimmer where the lamp shows it
+      n.glim = this.glowSprite(0xcfe0ff, n.h * 1.6, 0); n.glim.position.set(n.x, -n.y, n.z + 4); this.world.add(n.glim);
+      n.mats.forEach((mt) => { mt.metalness = 0.5; mt.roughness = 0.35; });
+    } else if (amber) {   // amber catches the lamp light; a soft inner warmth
+      n.mats.forEach((mt) => { mt.emissive = new THREE.Color(0xff9a30); mt.emissiveMap = mt.map; mt.emissiveIntensity = 0.25; mt.needsUpdate = true; });
     }
     this.world.add(o); this.nodes.push(n);
   }
@@ -460,7 +482,7 @@ class Game {
   lamp() {   // the belt lantern's place, in game units
     const p = new THREE.Vector3();
     if (this.beltLamp) this.beltLamp.getWorldPosition(p); else p.set(this.mx, -(this.my - S.minerHeight * 0.5), 0);
-    return { x: p.x, y: -p.y + S.minerHeight * 0.12, z: p.z };
+    return { x: p.x, y: -p.y - S.minerHeight * V.lampSize * 0.4, z: p.z };   // the glass, above the lantern's base
   }
   lampOn() { return this.oil > 0; }
 
@@ -680,7 +702,7 @@ class Game {
   // ---------- loop ----------
   frame(now) {
     if (!(now > 0)) now = performance.now();
-    const real = Math.min(now - this.prev, 100) / 1000, dt = real * this.speed; this.prev = now;
+    const real = clamp(now - this.prev, 0, 100) / 1000, dt = real * this.speed; this.prev = Math.max(this.prev, now);   // never a step back in time
     this.clock += dt;
     if (this.mine && !this.paused && !this.overlay) {
       for (let left = dt; left > 1e-6;) { const h = Math.min(left, S.maxStep); left -= h; this.step(h); }
@@ -720,7 +742,8 @@ class Game {
     this.swingT = Math.max(0, this.swingT - dt);
     const sp = this.speeds();
     if (this.mining || this.swingT > 0) { this.setAnim('swing', 0.1); this.acts.swing.timeScale = this.swingT > 0 ? 1.5 : 0; if (!this.swingT) this.acts.swing.time = 0; }
-    else if (this.mode === 'ladder') { this.setAnim('climb'); this.acts.climb.timeScale = Math.abs(this.climbV) / 22; }
+    else if (this.mode === 'ladder' && this.climbV > 0) this.setAnim('slide', 0.12);   // sliding down: grip the rails, no stepping
+    else if (this.mode === 'ladder') { this.setAnim('climb', 0.12); this.acts.climb.timeScale = -this.climbV / V.climbStride; }   // still on the rungs: paused
     else if (this.mode === 'air' && !this.falling) { this.setAnim('walk'); this.acts.walk.timeScale = 0.3; }
     else if (this.moving) { this.setAnim('walk'); this.acts.walk.timeScale = sp.walk / 46; }
     else this.setAnim('idle');
@@ -730,17 +753,26 @@ class Game {
       const u = this.acts.swing ? (this.acts.swing.time / this.acts.swing.getClip().duration) : 0, strike = Math.sin(Math.min(1, u * 2) * Math.PI / 2) * (u < 0.5 ? 1 : 1 - (u - 0.5) * 2);
       this.pick.rotation.z = THREE.MathUtils.lerp(1.9, -0.55, this.swingT > 0 ? strike : 0);
     }
-    // the bag on his back: flat and dark at 0, half-full from 1, full from bagFullAt; glows only with ore in it
+    // the bag on his back: flat at 0, half-full from 1, full from bagFullAt; its ore glows only with ore in it
     const bw = this.bagWeight(), fill = Math.min(1, bw / S.bagCapacity), hasOre = this.bag.length > 0;
-    const stage = !hasOre ? 0 : bw < S.bagFullAt ? 0.55 : 1;
-    const bh = (S.bagHeight[0] + (S.bagHeight[1] - S.bagHeight[0]) * fill) * 0.5;
-    const r = THREE.MathUtils.lerp(H * 0.1, H * 0.17, stage);
-    this.bagMesh.scale.set(stage ? r * 0.8 : H * 0.05, stage ? bh * 0.7 : H * 0.17, stage ? r : H * 0.13);
-    this.bagMesh.position.set(-H * (0.13 + 0.05 * stage), H * (stage ? 0.6 : 0.6), 0);
-    this.bagMat.emissiveIntensity = hasOre ? (lit ? 0.025 : 0.3) * (0.5 + fill) : 0;   // the ore inside shows through the cloth
-    this.bagMat.color.set(hasOre ? 0x5e4630 : 0x3a2d20);
-    this.bagGlow.position.copy(this.bagMesh.position); this.bagGlow.scale.setScalar(Math.max(1, r * 4));
-    this.bagGlow.material.opacity = hasOre ? (lit ? 0.12 : 0.45) * (0.5 + fill) : 0;
+    const stage = !hasOre ? 'empty' : bw < S.bagFullAt ? 'half' : 'full';
+    for (const k in this.bags) this.bags[k].visible = k === stage;
+    // the ore inside shows through; strongest when the lamp is out
+    this.bags[stage].userData.mats.forEach((mt) => { mt.emissiveIntensity = hasOre ? (lit ? 0.04 : 0.4) * (0.5 + fill) : 0; });
+    this.bagGlow.position.set(-H * 0.24, H * 0.62, H * 0.05); this.bagGlow.scale.setScalar(H * 0.7);
+    this.bagGlow.material.opacity = hasOre ? (lit ? 0.06 : 0.35) * (0.5 + fill) : 0;
+    // the belt lantern: the hook follows his hips; the lantern swings like a pendulum when he speeds up, stops or turns
+    if (this.hips) {
+      g.updateMatrixWorld(true);   // the skeleton as this frame's animation left it
+      const hp = new THREE.Vector3(); this.hips.getWorldPosition(hp); g.worldToLocal(hp);
+      this.lampPivot.position.set(hp.x + H * V.lampHook[0], hp.y + H * V.lampHook[1], hp.z + H * V.lampHook[2]);
+    }
+    const vx = this.lastMx == null || real <= 0 ? 0 : (this.mx - this.lastMx) / real; this.lastMx = this.mx;
+    const fwd = vx * this.facing, step = this.moving ? Math.sin((this.walkDist / V.walkStride) * Math.PI * 2) * 0.09 : 0;
+    const target = clamp(-fwd * 0.004, -0.35, 0.35) + step + (this.mode === 'ladder' ? 0 : 0);
+    this.lampVel += ((target - this.lampAng) * 38 - this.lampVel * 3.2) * Math.min(real, 0.05);
+    this.lampAng += this.lampVel * Math.min(real, 0.05);
+    this.lampPivot.rotation.z = this.lampAng;
     // the lamp
     this.minerRoot.updateMatrixWorld(true);
     const L = this.lamp();
