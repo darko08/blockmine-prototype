@@ -38,6 +38,9 @@ const V = {
   timberEvery: 5.5 * T,      // spacing of timber sets along a tunnel (zones 1-3)
   pickScale: 0.42,           // pickaxe length as a share of his height
   amberEmissive: [0.35, 0.55, 0.8, 1.1],    // amber (the sats) glows more the deeper it lies
+  vaultMonHeight: 170, vaultMonZ: -850, vaultMonSide: 0.5,   // the Great Vault on the surface: its height, its depth (just before the sky), how far left in the view
+  ghostMiners: 100, ghostSeed: 15000,                      // practice: a simulated crowd this size; the Vault starts where it keeps it
+  ghostTricklePerBlock: 410, ghostKnockPerBlock: 190, ghostPiecesPerBlock: 0.49,   // its flows, from the simulator's projection
   humRange: 900, music: false,             // world units: the hum of the Deep is heard this far from the Vault, louder closer
   lampSize: 0.16,            // the belt lantern's height, handle included, as a share of his height
   lampHook: [0.04, 0.02, 0.15],   // the belt hook, from his hips: forward, up, to his right (shares of his height)
@@ -198,7 +201,7 @@ class Game {
     this.hatch = 'waiting'; this.paused = false; this.overlay = false;
     this.shutTimer = null; this.msgUntil = 0; this.clock = 0; this.blockInfo = null; this.risk = 0; this.shake = 0; this.last = {};
 
-    this.buildMiner(); this.buildFx(); this.buildCoins();
+    this.buildMiner(); this.buildFx(); this.buildCoins(); this.buildVaultShow();
     const c = this.renderer.domElement;
     c.addEventListener('pointerdown', (e) => this.down(e)); window.addEventListener('pointermove', (e) => this.move(e));
     window.addEventListener('pointerup', (e) => this.up(e)); window.addEventListener('pointercancel', (e) => this.up(e));
@@ -220,6 +223,7 @@ class Game {
     const viewH = Math.max(V.viewHeight, minWide / this.camera.aspect);
     this.camDist = viewH / 2 / Math.tan(THREE.MathUtils.degToRad(V.fov / 2));
     this.camera.updateProjectionMatrix();
+    this.placeVaultShow();
   }
 
   // ---------- building the mine ----------
@@ -364,6 +368,7 @@ class Game {
       const label = this.textSprite('LEVEL ' + (l + 1), 11); label.position.set(x + 4, -(cy - 3), zf); label.center.set(0, 0); this.world.add(label);
       label.material.depthTest = false; label.renderOrder = 30; label.visible = false; (this.levelLabels = this.levelLabels || [])[l] = label;   // shown whole once he gets there, never half under the dark
     });
+    this.placeVaultShow();
     // the headframe over the shaft, and the hatch lid when the hatch is shut
     const hx = G.colX(m.c0);
     if (this.A.models.headframe) { const hf = place(this.A.models.headframe, 190); hf.position.set(hx, 0, -T * 0.6); this.world.add(hf); }
@@ -586,6 +591,157 @@ class Game {
       }, delay);
     }
   }
+  // ---------- the Great Vault, out on the surface in the background: what it holds, and the amber flowing in and out ----------
+  // A monolith of dark amber far behind the headframe, glowing from inside, the lamps of the fallen fused into it. Above it,
+  // its count and what a piece is worth. Amber motes rise from the shaft into it: a trickle from lamp sales and dropped
+  // amber, a surge at every knock from the bags of the caught. When a piece is carried out, a chunk breaks away.
+  buildVaultShow() {
+    const g = this.vaultMon = new THREE.Group(), H = V.vaultMonHeight, W = H * 0.56, Dp = H * 0.2;
+    // the monolith: a tall slab, its edges chipped, lit from inside through its veins
+    if (!this.amberTex) this.vaultObject({ x: 0, base: S.pileSink, h: 1 });   // makes the shared amber-vein texture
+    const geo = new THREE.BoxGeometry(W, H, Dp, 6, 12, 2), pos = geo.attributes.position, r = seededRandom('vault-monolith');
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i) / H + 0.5, taper = 1 - y * 0.22;   // narrower towards the top, a rough outline
+      pos.setXYZ(i, pos.getX(i) * taper * (0.92 + r() * 0.16), pos.getY(i) + (r() - 0.5) * H * 0.012, pos.getZ(i) * (0.85 + r() * 0.3));
+    }
+    geo.computeVertexNormals();
+    this.vaultMonMat = new THREE.MeshPhysicalMaterial({ color: 0x6a3208, roughness: 0.22, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.2, emissive: new THREE.Color(0xffffff), emissiveMap: this.amberTex, emissiveIntensity: 0.5 });
+    const slab = new THREE.Mesh(geo, this.vaultMonMat); slab.position.y = H / 2; g.add(slab);
+    // its plinth: a heap of dark rock
+    const rock = new THREE.MeshStandardMaterial({ color: 0x1c1712, roughness: 0.95, flatShading: true });
+    for (let i = 0; i < 14; i++) {
+      const st = new THREE.Mesh(new THREE.DodecahedronGeometry(H * (0.05 + r() * 0.06), 0), rock);
+      st.position.set((r() - 0.5) * W * 1.6, H * 0.02, (r() - 0.5) * Dp * 1.6); st.scale.set(1.4, 0.6, 1); st.rotation.set(r() * 3, r() * 3, r() * 3); g.add(st);
+    }
+    // the lamps of the fallen, half sunk in its face
+    if (this.A.models.lantern) for (let i = 0; i < 7; i++) {
+      const l = place(this.A.models.lantern, H * 0.07, { cast: false });
+      l.position.set((r() - 0.5) * W * 0.7, H * (0.12 + r() * 0.7), Dp * 0.45); l.rotation.set((r() - 0.5) * 1.6, r() * 3, (r() - 0.5) * 1.6); g.add(l);
+    }
+    this.vaultMonLight = new THREE.PointLight(0xffb060, 0, H * 3, 1.2); this.vaultMonLight.position.set(H * 0.25, H * 0.6, Dp * 2.2); g.add(this.vaultMonLight);
+    this.vaultMonGlow = this.glowSprite(0xff8a30, H * 1.9, 0.22); this.vaultMonGlow.position.set(0, H * 0.5, -Dp); g.add(this.vaultMonGlow);
+    // the sign above it: what it holds and what a piece is worth
+    const c = document.createElement('canvas'); c.width = 640; c.height = 300;
+    this.vaultSign = { c, ctx: c.getContext('2d'), tex: new THREE.CanvasTexture(c), shown: -1, at: 0 };
+    this.vaultSign.tex.colorSpace = THREE.SRGBColorSpace;
+    const sign = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.vaultSign.tex, transparent: true, depthWrite: false, toneMapped: false }));
+    sign.scale.set(H * 1.7, H * 1.7 * 300 / 640, 1); sign.position.set(0, H * 1.3, 0); g.add(sign);
+    // the motes that carry amber in and out
+    const N = 260, pg = new THREE.BufferGeometry();
+    pg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(N * 3), 3));
+    pg.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(N * 3), 3));
+    this.motes = { pts: new THREE.Points(pg, new THREE.PointsMaterial({ size: 9, vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, toneMapped: false })), list: [], N };
+    this.motes.pts.frustumCulled = false; this.scene.add(this.motes.pts);
+    this.vs = { shown: null, carry: 0, flash: 0 };
+    this.scene.add(g);
+  }
+  placeVaultShow() {   // far back on the surface, to the left of where he waits, wherever the screen shape puts that
+    if (!this.vaultMon || !this.mine || !this.camDist) return;
+    const halfW0 = this.camDist * Math.tan(THREE.MathUtils.degToRad(V.fov / 2)) * this.camera.aspect;
+    const halfW = halfW0 * (this.camDist - V.vaultMonZ) / this.camDist, waitX = this.mine.G.colX(this.mine.c0) - S.waitOffset * T;
+    this.vaultMon.position.set(waitX - halfW * V.vaultMonSide, -V.vaultMonHeight * 0.28, V.vaultMonZ);   // a little sunk, as if behind a ridge
+  }
+  vaultTruth() { return Math.max(0, Math.floor(this.eco ? this.eco.vault : 0)); }
+  // amber flows: 'in' (a trickle), 'knock' (the caught bags, at the knock) or 'out' (a piece carried out)
+  vaultFlow(kind, amount, who) {
+    if (!this.vaultMon || !(amount > 0)) return;
+    const m = this.vaultMon.position, H = V.vaultMonHeight, hx = this.mine ? this.mine.G.colX(this.mine.c0) : m.x;
+    const top = new THREE.Vector3(m.x, H * 1.02, m.z), shaft = new THREE.Vector3(hx, 8, 0);
+    if (kind === 'out') {
+      this.vs.shown = Math.max(0, (this.vs.shown == null ? this.vaultTruth() : this.vs.shown) - amount); this.vs.flash = 1;
+      for (let i = 0; i < 34; i++) this.mote(new THREE.Vector3(m.x + (Math.random() - 0.5) * H * 0.3, H * (0.3 + Math.random() * 0.5), m.z + 30), shaft, 0, 1.1 + Math.random() * 0.8, 0xfff0b0);
+      const p = this.screen(m.x, -H * 0.6, m.z);
+      if (p.x > 0 && p.x < innerWidth && p.y > 0 && p.y < innerHeight) this.floatAt(p.x, p.y, '−' + fmt(amount) + ' · a Vault piece carried out' + (who ? ' by ' + who : ''));
+      if (!this.below()) this.say((who || 'A miner') + ' carried out a Vault piece: ' + fmt(amount) + ' sats.', 3.5);
+      this.clink(4, true);
+      return;
+    }
+    const n = kind === 'knock' ? Math.min(60, 12 + Math.round(Math.log2(1 + amount) * 4)) : 1;
+    for (let i = 0; i < n; i++) {
+      const from = shaft.clone().add(new THREE.Vector3((Math.random() - 0.5) * 30, Math.random() * 10, 0));
+      this.mote(from, top.clone().add(new THREE.Vector3((Math.random() - 0.5) * H * 0.2, 0, 0)), amount / n, (kind === 'knock' ? 1.6 : 2.2) + Math.random() * 0.9, kind === 'knock' ? 0xff7a20 : 0xffa040, kind === 'knock' ? i * 0.03 : 0);
+    }
+    if (kind === 'knock' && !this.below()) this.say('The knock: ' + fmt(amount) + ' sats from the caught pour into the Vault.', 3);
+  }
+  mote(from, to, carry, dur, color, delay = 0) {
+    const M = this.motes; if (M.list.length >= M.N) { this.vs.carry += carry; return; }
+    const mid = from.clone().lerp(to, 0.5); mid.y += V.vaultMonHeight * (0.5 + Math.random() * 0.4); mid.x += (Math.random() - 0.5) * 120;
+    M.list.push({ from, mid, to, t: -delay, dur, carry, c: new THREE.Color(color) });
+  }
+  vaultShowStep(dt) {
+    if (!this.vaultMon) return;
+    const M = this.motes, pos = M.pts.geometry.attributes.position, col = M.pts.geometry.attributes.color, a = new THREE.Vector3(), b = new THREE.Vector3();
+    let k = 0;
+    if (this.vs.shown == null) this.vs.shown = this.vaultTruth();
+    M.list = M.list.filter((q) => {
+      q.t += dt; if (q.t < 0) return true;
+      const f = Math.min(1, q.t / q.dur), e = f * f * (3 - 2 * f);
+      a.copy(q.from).lerp(q.mid, e); b.copy(q.mid).lerp(q.to, e); a.lerp(b, e);   // a rising arc
+      if (f >= 1) { this.vs.shown += q.carry; if (q.carry) this.vs.flash = Math.min(1, this.vs.flash + 0.08); return false; }
+      pos.setXYZ(k, a.x, a.y, a.z); const glow = 0.6 + 0.4 * Math.sin(f * Math.PI); col.setXYZ(k, q.c.r * glow, q.c.g * glow, q.c.b * glow); k++;
+      return true;
+    });
+    for (let i = k; i < M.N; i++) pos.setXYZ(i, 0, -1e5, 0);
+    pos.needsUpdate = true; col.needsUpdate = true; M.pts.geometry.setDrawRange(0, k);
+    // the count: it rises as the motes arrive, and drifts to the true amount when nothing is in flight
+    if (this.vs.carry) { this.vs.shown += this.vs.carry; this.vs.carry = 0; }
+    const truth = this.vaultTruth();
+    if (!M.list.length) this.vs.shown += (truth - this.vs.shown) * Math.min(1, dt * 0.8);
+    // it breathes, brighter as it grows and when amber arrives
+    this.vs.flash = Math.max(0, this.vs.flash - dt * 1.5);
+    const big = Math.min(1, Math.log10(1 + truth) / 5), t = this.clock * 1.3;
+    this.vaultMonMat.emissiveIntensity = 0.35 + 0.25 * big + 0.12 * Math.sin(t) + 0.9 * this.vs.flash;
+    this.vaultMonLight.intensity = (2 + 4 * big + 10 * this.vs.flash) * (this.below() ? 0 : 1);
+    this.vaultMonGlow.material.opacity = 0.14 + 0.12 * big + 0.25 * this.vs.flash;
+    this.drawVaultSign();
+  }
+  drawVaultSign() {
+    const sgn = this.vaultSign, now = performance.now(), v = Math.max(0, Math.round(this.vs.shown));
+    if (v === sgn.shown && now - sgn.at < 1000) return;
+    if (now - sgn.at < 90) return;
+    sgn.shown = v; sgn.at = now;
+    const x = sgn.ctx, W = sgn.c.width;
+    x.clearRect(0, 0, W, sgn.c.height); x.textAlign = 'center'; x.shadowColor = 'rgba(0,0,0,.9)'; x.shadowBlur = 8;
+    x.font = '500 34px "Cormorant Garamond", Georgia, serif'; x.fillStyle = '#c9a46a';
+    x.fillText('T H E   G R E A T   V A U L T', W / 2, 46);
+    x.font = '500 108px "Cormorant Garamond", Georgia, serif'; x.fillStyle = '#ffb547'; x.shadowColor = 'rgba(255,140,40,.85)'; x.shadowBlur = 26;
+    x.fillText(fmt(v), W / 2, 160);
+    x.shadowColor = 'rgba(0,0,0,.9)'; x.shadowBlur = 8; x.font = '400 34px "Cormorant Garamond", Georgia, serif'; x.fillStyle = '#efe8da';
+    x.fillText('sats · a piece is worth ' + fmt(Math.floor(v * RULES.vaultPieceShare)), W / 2, 212);
+    x.font = 'italic 400 26px "Cormorant Garamond", Georgia, serif'; x.fillStyle = '#a89f8e';
+    x.fillText(this.net ? 'everyone in the shaft feeds it' : 'practice shaft · fed by ' + V.ghostMiners + ' simulated miners', W / 2, 262);
+    sgn.tex.needsUpdate = true;
+  }
+  floatAt(px, py, txt) {
+    const d = document.createElement('div'); d.className = 'float vaultFloat'; d.textContent = txt; d.style.left = px + 'px'; d.style.top = py + 'px'; document.body.appendChild(d);
+    requestAnimationFrame(() => { d.style.transform = 'translate(-50%, -260%)'; d.style.opacity = '0'; });
+    setTimeout(() => d.remove(), 2600);
+  }
+  // practice: a simulated crowd of miners feeds the Vault at the rates the simulator finds for that crowd, and now and then
+  // one of them carries a piece out. Clearly labelled on the sign. (Online the server sends the real flows instead.)
+  ghostStep(dt) {
+    if (this.net || !this.eco || this.paused) return;
+    const gh = this.ghost || (this.ghost = { next: 1 + Math.random() * 3, save: 0 });
+    if (this.eco.vault < V.ghostSeed * 0.25 && !gh.seeded) {   // a new practice shaft: the Vault starts where such a crowd keeps it
+      const add = V.ghostSeed - this.eco.vault; this.eco.vault += add; this.eco.paidIn += add; gh.seeded = true; this.vs.shown = this.eco.vault; this.saveMoney();
+    }
+    gh.next -= dt;
+    if (gh.next <= 0) {   // a trickle: lamps sold and amber dropped by the crowd
+      const gap = 1 + Math.random() * 3.5, amt = Math.max(1, Math.round(V.ghostTricklePerBlock / 600 * gap * (0.4 + Math.random() * 1.2)));
+      gh.next = gap; this.eco.vault += amt; this.eco.paidIn += amt; this.vaultFlow('in', amt);
+      gh.save += gap; if (gh.save > 8) { gh.save = 0; this.saveMoney(); }
+    }
+    if (Math.random() < dt * V.ghostPiecesPerBlock / 600) {   // one of them carries a piece out
+      const piece = this.eco.vaultPieceValue();
+      if (piece > 0) { this.eco.carriedOut(0, piece); this.vaultFlow('out', piece, 'Miner ' + (1000 + Math.floor(Math.random() * 9000))); this.saveMoney(); }
+    }
+  }
+  ghostKnock() {   // the knock: the crowd's caught bags pour their share into the Vault
+    if (this.net || !this.eco) return;
+    const amt = Math.round(V.ghostKnockPerBlock * Math.exp(0.5 * (Math.random() * 2 - 1)));
+    this.eco.vault += amt; this.eco.paidIn += amt; this.saveMoney();
+    setTimeout(() => this.vaultFlow('knock', amt), 400);
+  }
   burst(count, x, y, z, tint) {
     const S2 = this.sparks, cols = [0xffe0a0, 0xffa030, 0xffffff];
     for (let i = 0; i < count; i++) {
@@ -617,6 +773,7 @@ class Game {
       return;
     }
     Sound.knock(); this.shake = 0.45;
+    this.ghostKnock();
     if (this.below()) this.caught();
     this.hatch = 'shut'; this.mining = null;
     this.shutTimer = setTimeout(() => this.openMine(b, true), (S.hatchShutSeconds * 1000) / this.speed);
@@ -1116,6 +1273,7 @@ class Game {
     for (const n of this.nodes) n.flash = Math.max(0, (n.flash || 0) - dt);
     if (this.mine) this.draw(real, dt);
     if (this.mine) this.coinsStep(real);
+    if (this.mine) this.vaultShowStep(real);
     if (this.mine) Music.update(real, this.mode === 'ladder' ? this.mine.ladders[this.ladderK].top : this.falling ? this.falling.toLvl : this.lvl);
     if (this.net && this.mine) this.net.frame(real);
     if (this.levelLabels && this.lvl >= 0 && this.levelLabels[this.lvl]) this.levelLabels[this.lvl].visible = true;
@@ -1123,6 +1281,7 @@ class Game {
     this.renderer.render(this.scene, this.camera);
   }
   step(dt) {
+    this.ghostStep(dt);
     this.spawn(dt);
     const wasBelow = this.below();
     this.physics(dt);
@@ -1576,6 +1735,8 @@ class Net {
       if (g.mining && g.mining.id === id) g.mining = null;
     }
     if (m.hp) for (const id in m.hp) { const n = g.nodes.find((q) => q.id === +id); if (n) n.hp = m.hp[id]; }
+    if (m.vault !== undefined) g.eco.vault = m.vault;
+    for (const e of m.vev || []) g.vaultFlow(e.k, e.a, e.who);
     if (m.far) this.far = m.far;
     this.drawOthers(m.near || [], this.far || []);
   }
