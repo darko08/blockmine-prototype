@@ -1,12 +1,12 @@
-// Blockmine 3D: the cutaway mine with real 3D models, a lit lantern and shadows.
-// The rules are the 2D cutaway's: the same mine from the block hash (cutaway/mine.js), the same settings
-// (cutaway/settings.js), the same block clock, records and sounds. Only the drawing is new.
+// Blockmine 3D: the mine of the BLOCKMINE brief, drawn in 3D with a lit lantern and shadows.
+// The rules are in rules3d.js (numbers), mine3d.js (the mine from the block hash) and economy3d.js (where every point
+// goes); the simulator and the server use the same files. The block clock, records and sounds are the 2D game's.
 // World: the game's units, x to the right and y downward; in three.js X = x, Y = -y, and Z points at the camera.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const S = window.SETTINGS;
+const S = window.SETTINGS, RULES = window.RULES, MineGen = window.MineGen3, { Economy, Purse } = window.Economy3;
 const TEST = new URLSearchParams(location.search).has('test');
 const T = S.tile, $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -14,14 +14,17 @@ const mmss = (ms) => {
   const t = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = String(t % 60).padStart(2, '0');
   return h ? h + ':' + String(m).padStart(2, '0') + ':' + s : m + ':' + s;
 };
-const mineralText = (c) => ['amber', 'iron', 'silver'].filter((k) => c[k]).map((k) => c[k] + ' ' + k).join(', ');
+const mineralText = (c) => ['coal', 'iron', 'silver'].filter((k) => c[k]).map((k) => c[k] + ' ' + k).join(', ');
+const fmt = (n) => Math.round(n).toLocaleString('en');
 
 // ---- the look of the 3D version (its own numbers; the rules' numbers stay in cutaway/settings.js) ----
 const V = {
   depth: 2.3 * T,            // how deep the tunnels go into the rock, front to back
   viewHeight: S.minerHeight / S.minerScreenShare,   // world units the camera shows top to bottom, as in 2D
   fov: 32, tilt: 0.07,       // camera: field of view, and a slight look down
-  lampIntensity: 120, lampDistance: S.lightRadius * T * 2.6, lampDecay: 1, lampOffset: [0, 18, 42], lampFill: 0.45,   // share of the lamp's light that casts no shadow (softens his shadow) lampColor: 0xffc890,   // an oil flame: warm, but closer to white than to yellow
+  lampIntensity: 120, lampDistance: S.lightRadius * T * 2.6, lampDecay: 1, lampOffset: [0, 18, 42],
+  lampFill: 0.45,            // share of the lamp's light that casts no shadow (softens his shadow)
+  lampColor: 0xffc890,       // an oil flame: warm, but closer to white than to yellow
   lampHalo: 0.1, flameSize: 0.05,
   ambient: 0.55,             // what lets the fog's "seen" areas stay dimly visible
   moon: 1.1,                 // light on the surface at night
@@ -29,7 +32,8 @@ const V = {
   propHeight: { cart: 30, barrel: 22, crate: 20, lantern: 18 },
   timberEvery: 5.5 * T,      // spacing of timber sets along a tunnel (zones 1-3)
   pickScale: 0.42,           // pickaxe length as a share of his height
-  bitcoinEmissive: [0.35, 0.55, 0.8, 1.1],
+  amberEmissive: [0.35, 0.55, 0.8, 1.1],    // amber (the sats) glows more the deeper it lies
+  humRange: 900,             // world units: the hum of the Deep is heard this far from the Vault, louder closer
   lampSize: 0.16,            // the belt lantern's height, handle included, as a share of his height
   lampHook: [0.04, 0.02, 0.15],   // the belt hook, from his hips: forward, up, to his right (shares of his height)
   turnRate: 7,               // how quickly he turns to face a new way (higher = snappier)
@@ -43,7 +47,7 @@ const V = {
   jumpTimes: [0.68, 1.03, 1.35, 1.75],   // the Mixamo jump clip: take-off, peak, touch-down, back up from the landing crouch (s)
   landSeconds: 0.22,         // how long the landing crouch shows before he walks or stands again
 };
-const MODELS = ['miner', 'pick', 'dep_bitcoin', 'dep_iron', 'dep_silver', 'dep_amber', 'bag_empty', 'bag_half', 'bag_full', 'ladder', 'headframe', 'cart', 'barrel', 'crate', 'lantern', 'timber'];
+const MODELS = ['miner', 'pick', 'dep_bitcoin', 'dep_iron', 'dep_silver', 'bag_empty', 'bag_half', 'bag_full', 'ladder', 'headframe', 'cart', 'barrel', 'crate', 'lantern', 'timber'];
 
 // ---------- sound: mute button and M, remembered in this browser (same as the 2D page) ----------
 const MUTE_KEY = 'blockmine.cutaway.muted';
@@ -65,6 +69,9 @@ $('mute').addEventListener('click', () => { toggleMute(); $('mute').blur(); });
 window.addEventListener('keydown', (e) => { if (e.code === 'KeyM' && !e.repeat) toggleMute(); });
 
 const records = Records(TEST, 'cutaway3d');
+const ECO_KEY = 'blockmine3d.economy' + (TEST ? '.test' : ''), PURSE_KEY = 'blockmine3d.purse' + (TEST ? '.test' : '');
+const loadJSON = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
+const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 if (TEST) $('test').style.display = 'block';
 
 // ---------- fog of war, painted into every material: lit around the lamp, dim where you have been, black elsewhere ----------
@@ -93,7 +100,7 @@ const loader = new GLTFLoader();
 const texLoader = new THREE.TextureLoader();
 async function loadAll() {
   const models = {};
-  await Promise.all(MODELS.map((n) => new Promise((res) => loader.load('models/' + n + '.glb?v=10', (g) => { models[n] = g; res(); }, undefined, () => res()))));
+  await Promise.all(MODELS.map((n) => new Promise((res) => loader.load('models/' + n + '.glb?v=11', (g) => { models[n] = g; res(); }, undefined, () => res()))));
   const tex = (p) => new Promise((res) => texLoader.load('../' + p + '?v=' + S.artVersion, (t) => {
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; res(t);
   }, undefined, () => res(null)));
@@ -140,7 +147,9 @@ class Game {
     this.stun = 0; this.pitReturn = null; this.facing = 1; this.speed = 1; this.walkDist = 0; this.climbDist = 0; this.moving = false; this.climbV = 0;
     this.keys = { left: false, right: false, up: false, down: false }; this.pad = { left: false, right: false }; this.press = { jump: false, action: false };
     this.mining = null; this.drag = null; this.swingT = 0;
-    this.bag = []; this.oil = S.oilStart; this.inShift = false;
+    this.bag = []; this.inShift = false;
+    this.eco = Economy(RULES, loadJSON(ECO_KEY)); this.purse = Purse(RULES, loadJSON(PURSE_KEY));
+    this.lampLit = false; this.oilLeft = 0;      // the lamp for this shift; measures of extra oil still burning
     this.hatch = 'waiting'; this.paused = false; this.overlay = false;
     this.shutTimer = null; this.msgUntil = 0; this.clock = 0; this.blockInfo = null; this.risk = 0; this.shake = 0; this.last = {};
 
@@ -173,13 +182,13 @@ class Game {
     const m = this.mine, G = m.G, last = S.levels - 1, D = V.depth, zf = D / 2, zb = -D / 2;
     // the rock: a grid of cells, solid except tunnels and ladder shafts. Solid runs become boxes whose faces are the rock
     // front, the tunnel floors and ceilings and the tunnel ends; the back wall closes every opening.
-    const c0 = -14, c1 = S.cols + 14, rows = G.floorY(last) / T + 5;
+    const c0 = -14, c1 = m.cols + 14, rows = G.floorY(last) / T + 5;
     const open = new Set(), key = (c, r) => c + ',' + r;
     m.levels.forEach((seg, l) => {
       for (let r = G.ceilY(l) / T; r < G.floorY(l) / T; r++) for (let c = seg.a; c <= seg.b; c++) open.add(key(c, r));
     });
     m.ladders.forEach((d) => { for (let r = G.floorY(d.top) / T; r < G.ceilY(d.bottom) / T; r++) open.add(key(d.c, r)); });
-    const zoneOfRow = (r) => { const l = Math.ceil((r * T + 1) / (S.levelSpacing * T)) - 1; return clamp(Math.floor(l / S.zoneLevels), 0, 3); };
+    const zoneOfRow = (r) => { const l = Math.ceil((r * T + 1) / (S.levelSpacing * T)) - 1; return G.zone(clamp(l, 0, last)); };
     const geo = [0, 1, 2, 3].map(() => ({ rock: [], back: [] }));
     const quad = (arr, a, b, c, d, n, uv) => arr.push({ p: [a, b, c, d], n, uv });
     const R = V.rockTex;
@@ -226,7 +235,7 @@ class Game {
     if (this.A.surface) {
       const img = this.A.surface.image, w = S.surfaceWidth * 2.2, h = w * img.height / img.width;
       const sky = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: this.A.surface, color: 0x9a9a9a }));
-      sky.position.set(S.cols * T / 2, h * (0.5 - S.surfaceGround) * 0.98 + 40, -900); sky.userData.own = true; this.world.add(sky);
+      sky.position.set(m.cols * T / 2, h * (0.5 - S.surfaceGround) * 0.98 + 40, -900); sky.userData.own = true; this.world.add(sky);
     }
     // ladders: one ladder model per ladder, stretched to its length
     const lad = this.A.models.ladder;
@@ -298,7 +307,7 @@ class Game {
     this.lid = new THREE.Mesh(new THREE.BoxGeometry(T * 1.4, 5, D * 0.9), fogged(new THREE.MeshStandardMaterial({ map: this.A.shaft[0], color: 0x9a7650, roughness: 0.9 })));
     this.lid.position.set(hx, 2.5, 0); this.lid.castShadow = true; this.lid.userData.own = true; this.world.add(this.lid);
     // the fog's memory of what you have seen
-    const W = S.cols * T;
+    const W = m.cols * T;
     const f = this.fog = { x0: -4 * T, y0: 0, cols: Math.ceil((W + 8 * T) / S.fogCell), rows: Math.ceil((G.floorY(last) + 4 * T) / S.fogCell) };
     f.seen = new Uint8Array(f.cols * f.rows);
     f.canvas = document.createElement('canvas'); f.canvas.width = f.cols; f.canvas.height = f.rows;
@@ -432,9 +441,10 @@ class Game {
   }
   openMine(b, ring) {
     this.nodes = [];
-    this.mine = MineGen.generate(b.hash, S);
-    MineGen.layoutNodes(this.mine); MineGen.layoutTerrain(this.mine);
+    this.mine = MineGen.generate(b.hash, S, RULES, 1);
+    MineGen.layoutTerrain(this.mine); MineGen.layoutNodes(this.mine, this.eco.budget());
     this.mine.spawnRng = seededRandom(b.hash + '|spawn'); this.mine.spawnT = 0;
+    this.lampLit = false; this.oilLeft = 0;   // a new shift: a new lamp to light
     this.hatch = 'open';
     this.buildMine();
     this.mine.nodes.forEach((n) => this.showNode(n));
@@ -443,50 +453,69 @@ class Game {
     this.say('Block ' + b.height.toLocaleString() + ' · the hatch is open', 4);
   }
 
-  // deposits, made from the 2D art: Bitcoin ore, iron and silver as piles on the floor against the back wall (as tall as
-  // the 2D piles), amber crystals growing out of the back wall at chest height
+  // deposits: amber (the satoshis: the glowing ore), coal, iron and silver as piles on the floor against the back wall,
+  // and on level 15 the Vault, seen only inside a miner's own lamplight
   showNode(n) {
-    const M = this.A.models, zb = -V.depth / 2, amber = n.kind === 'amber';
-    const o = place(M['dep_' + n.kind], amber ? n.r * 3.0 : n.h * V.pileScale, { cloneMat: true });
-    const jit = (n.crack / Math.PI - 0.5) * 0.5;
-    if (amber) {   // the cluster's base against the wall, crystals pointing out and up
-      o.rotation.set(Math.PI * 0.32, jit, 0);
-      o.position.set(n.x, -(n.y + n.r * 1.2), zb + 1);
-    } else {
-      o.rotation.y = jit;
+    const M = this.A.models, zb = -V.depth / 2;
+    let o;
+    if (n.kind === 'vault') o = this.vaultObject(n);
+    else {
+      const model = { amber: M.dep_bitcoin, coal: M.dep_iron, iron: M.dep_iron, silver: M.dep_silver }[n.kind];
+      o = place(model, n.h * V.pileScale * (n.kind === 'coal' ? 0.8 : 1), { cloneMat: true });
+      o.rotation.y = (n.crack / Math.PI - 0.5) * 0.5;
       o.position.set(n.x, -(n.base - S.pileSink), zb + V.depth * 0.3);
     }
     n.obj = o; n.mats = []; o.traverse((m) => m.isMesh && n.mats.push(m.material));
-    n.z = amber ? zb + n.r * 2 : o.position.z + V.depth * 0.2;
+    n.z = o.position.z + V.depth * 0.2;
     n.baseScale = o.scale.x;
-    if (n.kind === 'bitcoin') {   // the only deposit that glows, pulses, and glimmers through the fog: its cracks light up
+    if (n.kind === 'amber') {   // the satoshis: its cracks glow and pulse; outside the lamplight only a faint glimmer shows
       n.mats.forEach((mt) => { mt.emissive = new THREE.Color(n.rich ? 0xfff0c0 : 0xffb060); mt.emissiveMap = mt.map; mt.needsUpdate = true; });
       n.glim = this.glowSprite(n.rich ? 0xfff0b0 : 0xff7a20, n.h * 1.4, 0); n.glim.position.set(n.x, -n.y, n.z + 4); n.glim.renderOrder = 10; n.glim.material.depthTest = false;
       this.world.add(n.glim);
     } else if (n.kind === 'silver') {   // a faint cold shimmer where the lamp shows it
       n.glim = this.glowSprite(0xcfe0ff, n.h * 1.6, 0); n.glim.position.set(n.x, -n.y, n.z + 4); this.world.add(n.glim);
       n.mats.forEach((mt) => { mt.metalness = 0.5; mt.roughness = 0.35; });
-    } else if (amber) {   // amber catches the lamp light; a soft inner warmth
-      n.mats.forEach((mt) => { mt.emissive = new THREE.Color(0xff9a30); mt.emissiveMap = mt.map; mt.emissiveIntensity = 0.25; mt.needsUpdate = true; });
+    } else if (n.kind === 'coal') {   // coal: the iron heap's shape, black and a little glossy
+      n.mats.forEach((mt) => { mt.color = new THREE.Color(0x1a1816); mt.roughness = 0.45; mt.metalness = 0.15; mt.map = null; mt.needsUpdate = true; });
     }
     this.world.add(o); this.nodes.push(n);
+  }
+  // the Vault piece: a slab of dark amber the size of a loaf of bread, glowing from inside, old lamps fused into it
+  vaultObject(n) {
+    const g = new THREE.Group(), H = S.minerHeight, zb = -V.depth / 2;
+    // dark amber with brighter veins, lit from inside: a canvas texture of cracks for the glow
+    if (!this.amberTex) {
+      const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d'), r = seededRandom('amber-veins');
+      x.fillStyle = '#140600'; x.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 70; i++) { x.strokeStyle = `rgba(255,${120 + r() * 80 | 0},20,${0.25 + r() * 0.6})`; x.lineWidth = 0.6 + r() * 2.2; x.beginPath(); let px = r() * 256, py = r() * 256; x.moveTo(px, py); for (let k = 0; k < 6; k++) { px += (r() - 0.5) * 60; py += (r() - 0.5) * 60; x.lineTo(px, py); } x.stroke(); }
+      const gr = x.createRadialGradient(128, 128, 10, 128, 128, 130); gr.addColorStop(0, 'rgba(255,150,40,0.55)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = gr; x.fillRect(0, 0, 256, 256);
+      this.amberTex = new THREE.CanvasTexture(c); this.amberTex.colorSpace = THREE.SRGBColorSpace;
+    }
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(H * 0.34, H * 0.16, H * 0.2, 4, 3, 3),
+      fogged(new THREE.MeshPhysicalMaterial({ color: 0x3a1804, roughness: 0.18, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.15,
+        emissive: new THREE.Color(0xffffff), emissiveMap: this.amberTex, emissiveIntensity: 1.1 })));
+    const pos = slab.geometry.attributes.position, rng = seededRandom('vault-slab');
+    for (let i = 0; i < pos.count; i++) pos.setXYZ(i, pos.getX(i) * (0.9 + rng() * 0.2), pos.getY(i) * (0.82 + rng() * 0.36), pos.getZ(i) * (0.88 + rng() * 0.24));
+    slab.geometry.computeVertexNormals(); slab.position.y = H * 0.08; slab.castShadow = true; g.add(slab);
+    if (this.A.models.lantern) for (const [x, r] of [[-0.09, 0.5], [0.07, -0.7], [0.12, 1.9]]) {   // the lamps of the fallen, half sunk in it
+      const l = place(this.A.models.lantern, H * 0.13, { cast: false }); l.position.set(x * H, H * 0.1, (r > 0 ? 0.08 : 0.06) * H); l.rotation.set(0.9 * Math.sign(r), r, 0.6); g.add(l);
+    }
+    const inner = new THREE.PointLight(0xff8a30, 6, H * 1.2, 1.6); inner.position.y = H * 0.12; g.add(inner);
+    g.position.set(n.x, -(n.base - S.pileSink), zb + V.depth * 0.35);
+    g.userData.inner = inner;
+    return g;
   }
   removeNode(n) {
     this.world.remove(n.obj); n.glim && this.world.remove(n.glim);
     this.nodes = this.nodes.filter((x) => x !== n);
     this.mine.nodes = this.mine.nodes.filter((x) => x !== n);
   }
-  spawn(dt) {
+  spawn(dt) {   // shallow ore regrows slowly during the shift, drawing on the block's budget
     const m = this.mine; if (this.hatch !== 'open' || !m) return;
     m.spawnT += dt;
-    while (m.spawnT >= S.spawnEverySeconds) {
-      m.spawnT -= S.spawnEverySeconds;
-      const w = S.spawnZoneWeights, total = w.reduce((a, b) => a + b, 0);
-      let pick = m.spawnRng() * total, z = 0;
-      while (pick >= w[z]) { pick -= w[z]; z++; }
-      const l = z * S.zoneLevels + Math.floor(m.spawnRng() * S.zoneLevels);
-      if (m.nodes.filter((n) => n.l === l).length >= S.maxNodesPerLevel) continue;
-      const n = MineGen.makeNode(m, m.spawnRng, l);
+    while (m.spawnT >= RULES.regrowEverySeconds) {
+      m.spawnT -= RULES.regrowEverySeconds;
+      const n = MineGen.regrow(m, m.spawnRng);
       if (n) this.showNode(n);
     }
   }
@@ -504,16 +533,17 @@ class Game {
     const l = this.falling ? this.falling.toLvl : this.lvl, [x0, x1] = MineGen.span(this.mine, l);
     return { kind: 'level', l, x: clamp(this.mx, x0, x1) };
   }
-  fill() { return Math.min(1, this.bagWeight() / S.bagCapacity); }
-  factor() { return 1 - (1 - S.fullBagSpeedFactor) * this.fill(); }
-  speeds() { const f = this.factor(); return { walk: S.runSpeed * f, up: S.climbSpeed * f, down: S.slideSpeed * f }; }
+  fill() { return Math.min(1, this.bagWeight() / RULES.bagCapacity); }
+  climbFactor() { return RULES.climbFactor(this.bagWeight(), S); }   // only climbing up is slowed by the bag
+  speeds() { return { walk: S.runSpeed, up: S.climbSpeed * this.climbFactor(), down: S.slideSpeed }; }
   hatchLoc() { return { kind: 'level', l: -1, x: this.mine.G.colX(this.mine.c0) }; }
   lamp() {   // the belt lantern's place, in game units
     const p = new THREE.Vector3();
     if (this.beltLamp) this.beltLamp.getWorldPosition(p); else p.set(this.mx, -(this.my - S.minerHeight * 0.5), 0);
     return { x: p.x, y: -p.y - S.minerHeight * V.lampSize * 0.4, z: p.z };   // the glass, above the lantern's base
   }
-  lampOn() { return this.oil > 0; }
+  lampOn() { return true; }   // the basic lamp never goes out
+  lightRadius() { return RULES.basicLight * (1 + RULES.oilWidenPerMeasure * this.oilLeft); }   // tiles; extra oil widens it
 
   // ---------- direct control (as in 2D) ----------
   bindKeys() {
@@ -582,8 +612,7 @@ class Game {
     if (!tg) return;
     const near = tg.kind === 'node' ? tg.n : null;
     if (near) {
-      if (!this.lampOn()) { this.say('Too dark to mine. Your lamp is out.', 2); return; }
-      if (this.bagWeight() + near.weight > S.bagCapacity + 1e-9) { this.say('Your bag is full. Drop ore or go up.', 2.5); return; }
+      if (this.bagWeight() + near.weight > RULES.bagCapacity + 1e-9) { this.say('Your bag is full. Drop ore or go up.', 2.5); return; }
       if (Math.abs(near.x - this.mx) < S.oreStandGap * T * 0.8) this.mx = near.standX;
       this.mining = near; this.facing = near.x < this.mx ? -1 : 1;
       this.say('Drag along the crack to swing', 2);
@@ -591,6 +620,11 @@ class Game {
     }
     const m = this.mine, best = tg.k;
     if (m.ladders[best].top === -1 && this.lvl === -1 && this.hatch !== 'open') { this.say('The hatch is shut.', 2); return; }
+    if (m.ladders[best].top === -1 && this.lvl === -1 && !this.lampLit) {   // one lamp is one shift: light one to go down
+      if (this.purse.lamps < 1) { this.say(this.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.', 3); this.openShop(); return; }
+      this.purse.lamps -= 1; this.lampLit = true; this.saveMoney();
+      this.say('Lamp lit for this shift' + (this.oilLeft ? ' · ' + this.oilLeft + ' measure' + (this.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
+    }
     this.mode = 'ladder'; this.ladderK = best; this.mx = m.G.colX(m.ladders[best].c); this.mining = null;
   }
   physics(dt) {
@@ -601,7 +635,7 @@ class Game {
       if (this.stun <= 0) { this.stun = 0; if (this.pitReturn != null) { this.mx = this.pitReturn; this.my = this.floorY(this.lvl); this.pitReturn = null; } }
       return;
     }
-    const f = this.factor(), onLadder = this.mode === 'ladder';
+    const cf = this.climbFactor(), onLadder = this.mode === 'ladder';
     const left = this.keys.left || (!onLadder && this.pad.left), right = this.keys.right || (!onLadder && this.pad.right);
     const up = this.keys.up || (onLadder && this.pad.left), down = this.keys.down || (onLadder && this.pad.right);
     const dir = (right ? 1 : 0) - (left ? 1 : 0);
@@ -611,12 +645,12 @@ class Game {
       if (dir && this.mining) this.mining = null;
       if (press.jump && !this.mining) {
         this.mode = 'air'; this.vy = -Math.sqrt(2 * S.gravity * S.jumpHeight); this.airT = 0;
-        this.vx = dir * S.runSpeed * f; if (dir) this.facing = dir;
+        this.vx = dir * S.runSpeed; if (dir) this.facing = dir;
         return;
       }
       if (dir && !this.mining) {
         this.facing = dir;
-        const want = this.mx + dir * S.runSpeed * f * dt, nx = clamp(this.blockRubble(this.lvl, this.mx, want, fy), x0, x1);
+        const want = this.mx + dir * S.runSpeed * dt, nx = clamp(this.blockRubble(this.lvl, this.mx, want, fy), x0, x1);
         if (Math.abs(nx - want) > 1e-6 && nx === this.blockRubble(this.lvl, this.mx, want, fy) && performance.now() > (this.rubbleHintAt || 0)) {
           this.say('Rubble in the way. Jump over it.', 2); this.rubbleHintAt = performance.now() + 4000;
         }
@@ -626,7 +660,7 @@ class Game {
       if (gap) this.startFall('gap', 0, gap);
     } else if (this.mode === 'ladder') {
       const d = this.mine.ladders[this.ladderK], y0 = this.floorY(d.top), y1 = this.floorY(d.bottom);
-      const v = up ? -S.climbSpeed * f : down ? S.slideSpeed * f : 0;
+      const v = up ? -S.climbSpeed * cf : down ? S.slideSpeed : 0;
       this.my += v * dt; this.climbDist += Math.abs(v * dt); this.climbV = v;
       if (v < 0 && this.my <= y0) this.stepOff(d, true, dir);
       else if (v > 0 && this.my >= y1) this.stepOff(d, false, dir);
@@ -684,7 +718,7 @@ class Game {
     const align = Math.abs(Math.cos(Math.atan2(dy, dx) - n.crack));
     const straight = disp / Math.max(disp, len);
     const t = clamp((align * straight - S.sloppyAt) / (S.cleanAt - S.sloppyAt), 0, 1);
-    const swingsNeeded = S.sloppySwings - t * (S.sloppySwings - S.cleanSwings);
+    const swingsNeeded = (S.sloppySwings - t * (S.sloppySwings - S.cleanSwings)) * (n.hardness || 1);   // deeper rock is harder
     n.hp -= 1 / swingsNeeded; n.flash = 0.12; this.swingT = V.swingSeconds; this.swingStart = true;
     Sound.tick();
     this.burst(t >= 1 ? 16 : 7, n.x, n.y, n.z);
@@ -692,10 +726,12 @@ class Game {
     if (n.hp <= 1e-9) {
       this.burst(24, n.x, n.y, n.z);
       this.removeNode(n); this.mining = null;
-      if (this.bagWeight() + n.weight > S.bagCapacity + 1e-9) this.say('No room in the bag. The ore fell.', 2.5);
+      if (this.bagWeight() + n.weight > RULES.bagCapacity + 1e-9) { this.say('No room in the bag. The ore fell.', 2.5); if (n.kind === 'vault') this.returnVault(); }
       else {
-        this.bag.push({ kind: n.kind, sats: n.value, weight: n.weight });
-        this.say(n.kind === 'bitcoin' ? (n.rich ? 'Rich Bitcoin ore! ' : '') + '+' + n.value + ' sats in the bag' : '+1 ' + n.kind + ' in the bag', 2);
+        this.bag.push({ kind: n.kind, sats: n.value, weight: n.weight, l: n.l, dropped: !!n.dropped });
+        if (n.kind === 'amber') { this.float(n.x, n.y - n.r - 4, n.z, '+' + fmt(n.value) + ' sats'); this.say((n.rich ? 'A rich node! ' : '') + '+' + fmt(n.value) + ' sats carried. Kept only past the hatch.', 2.5); }
+        else if (n.kind === 'vault') this.say('The Vault piece! Worth a tenth of the Vault (now ' + fmt(this.eco.vaultPieceValue()) + ') if you carry it out. Weight 10.', 5);
+        else this.say('+1 ' + n.kind + ' in the bag (weight ' + n.weight + ')', 2);
       }
     }
   }
@@ -710,31 +746,57 @@ class Game {
     setTimeout(() => d.remove(), 800);
   }
 
-  caught() {
-    this.bag = []; this.inShift = false; this.oil = S.oilStart; this.drag = null;
+  caught() {   // the knock: the lamp and the bag are lost for good
+    const amber = this.bagSats();
+    this.eco.caught(amber); this.saveMoney();
+    const hadVault = this.bag.some((p) => p.kind === 'vault');
+    this.bag = []; this.inShift = false; this.lampLit = false; this.oilLeft = 0; this.drag = null;
     this.toSurface();
     records.get().timesCaught++; records.save();
-    this.showOverlay('The deep is closed', 'The knock came before you reached the hatch. Your bag is lost. That counts as 1 death.');
+    this.showOverlay('The deep is closed', 'The knock came before you reached the hatch. Your lamp and your bag (' + fmt(amber) + ' sats carried) are lost' + (hadVault ? ', and the Vault piece went back to the Vault' : '') + '.');
   }
-  bank() {
-    const sats = this.bagSats(), mins = this.bagMinerals(), r = records.get();
+  bank() {   // past the hatch, the bag is his: the miner keeps 90% of the amber, the studio 10%
+    const sats = this.bagSats(), mins = this.bagMinerals(), r = records.get(), vaultPiece = this.bag.some((p) => p.kind === 'vault');
+    const pieceValue = vaultPiece ? this.eco.vaultPieceValue() : 0;
+    const kept = this.inShift ? this.eco.carriedOut(sats, pieceValue) : 0;
     if (this.inShift) {
-      r.totalPoints += sats; r.minerals = r.minerals || {};
+      this.purse.points += kept;
+      r.totalPoints += kept; r.minerals = r.minerals || {};
       for (const k in mins) r.minerals[k] = (r.minerals[k] || 0) + mins[k];
-      records.save();
+      if (vaultPiece) r.vaultPieces = (r.vaultPieces || 0) + 1;
+      r.survived = (r.survived || 0) + 1;
+      records.save(); this.saveMoney();
     }
-    this.bag = []; this.inShift = false; this.oil = S.oilStart;
+    this.bag = []; this.inShift = false;
     const m = mineralText(mins);
-    if (sats || m) {
-      this.say('Banked ' + [sats ? sats + ' sats' : '', m].filter(Boolean).join(' · '), 3);
-      const plus = [sats ? '+' + sats + ' sats' : '', ...Object.entries(mins).map(([k, v]) => '+' + v + ' ' + k)].filter(Boolean).join(' · ');
+    if (kept || m) {
+      this.say((vaultPiece ? 'The Vault piece is yours! ' : '') + 'Kept ' + [kept ? fmt(kept) + ' sats' : '', m].filter(Boolean).join(' · ') + (kept ? ' (the Order takes a tenth)' : ''), 4);
+      const plus = [kept ? '+' + fmt(kept) + ' sats' : '', ...Object.entries(mins).map(([k, v]) => '+' + v + ' ' + k)].filter(Boolean).join(' · ');
       this.float(this.mine.G.colX(this.mine.c0), -S.minerHeight * 1.4, 0, plus);
       const v = $('vaultCell'); v.classList.remove('flash'); void v.offsetWidth; v.classList.add('flash');
     }
   }
+  // drop the last piece: it stays in the tunnel for anyone; dropped amber is worth half, the other half goes to the Vault.
+  // The Vault piece is never left lying: dropped, it goes back to the Vault.
+  drop() {
+    const p = this.bag.pop(); if (!p) return;
+    Sound.tick();
+    if (p.kind === 'vault') { this.returnVault(); this.say('The Vault piece went back to the Vault.', 2.5); return; }
+    if (!this.below() || this.mode !== 'ground') { this.say('Dropped ' + (p.kind === 'amber' ? fmt(p.sats) + ' sats' : '1 ' + p.kind) + ' down the shaft.', 1.5); if (p.kind === 'amber') this.eco.dropped(p.sats); this.saveMoney(); return; }
+    const value = p.kind === 'amber' && !p.dropped ? this.eco.dropped(p.sats) : p.sats;
+    const n = MineGen.makeNode(this.mine, Math.random, this.lvl, p.kind, value, { within: { a: Math.floor(this.mx / T) - 1, b: Math.floor(this.mx / T) + 1 } });
+    if (n) { n.dropped = true; this.showNode(n); }
+    this.saveMoney();
+    this.say('Dropped ' + (p.kind === 'amber' ? fmt(p.sats) + ' sats (now worth ' + fmt(value) + ' to whoever picks it up)' : '1 ' + p.kind), 2.5);
+  }
+  returnVault() {   // the piece is back where it lay, at the end of its side tunnel on level 15
+    const m = this.mine, v = m.vault; if (!v || this.nodes.includes(v)) return;
+    v.hp = 1; m.nodes.push(v); this.showNode(v);
+  }
+  saveMoney() { saveJSON(ECO_KEY, this.eco.toJSON()); saveJSON(PURSE_KEY, this.purse.toJSON()); }
   bagWeight() { return this.bag.reduce((a, b) => a + b.weight, 0); }
   bagSats() { return this.bag.reduce((a, b) => a + b.sats, 0); }
-  bagMinerals() { const c = {}; for (const b of this.bag) if (b.kind !== 'bitcoin') c[b.kind] = (c[b.kind] || 0) + 1; return c; }
+  bagMinerals() { const c = {}; for (const b of this.bag) if (b.kind !== 'amber' && b.kind !== 'vault') c[b.kind] = (c[b.kind] || 0) + 1; return c; }
 
   // ---------- loop ----------
   frame(now) {
@@ -758,11 +820,11 @@ class Game {
     if (!below && wasBelow) this.bank();
     const h = this.here();
     if (this.mode === 'ground' && h.l >= 0 && h.l + 1 > records.get().deepestLevel) { records.get().deepestLevel = h.l + 1; records.save(); }
-    if (below && this.oil > 0) {
-      this.oil = Math.max(0, this.oil - S.oilBurnPerSecond * dt);
-      if (this.oil === 0) this.say('Your lamp is out. Feel your way back to the ladders.', 4);
+    if (below && this.oilLeft > 0) {
+      this.oilLeft = Math.max(0, this.oilLeft - dt / RULES.oilSecondsPerMeasure);
+      if (this.oilLeft === 0) this.say('Your extra oil is spent. The lamp burns on, its circle small again.', 3);
     }
-    if (this.mining && (!this.lampOn() || !this.nodes.includes(this.mining))) this.mining = null;
+    if (this.mining && !this.nodes.includes(this.mining)) this.mining = null;
   }
 
   draw(real, dt) {
@@ -844,7 +906,7 @@ class Game {
     }
     // the bag on his back: flat at 0, half-full from 1, full from bagFullAt; its ore glows only with ore in it
     const bw = this.bagWeight(), fill = Math.min(1, bw / S.bagCapacity), hasOre = this.bag.length > 0;
-    const stage = !hasOre ? 'empty' : bw < S.bagFullAt ? 'half' : 'full';
+    const stage = !hasOre ? 'empty' : bw < RULES.bagCapacity * 0.7 ? 'half' : 'full';
     for (const k in this.bags) this.bags[k].visible = k === stage;
     // the ore inside shows through; strongest when the lamp is out
     this.bags[stage].userData.mats.forEach((mt) => { mt.emissiveIntensity = hasOre ? (lit ? 0.04 : 0.4) * (0.5 + fill) : 0; });
@@ -875,6 +937,7 @@ class Game {
     const L = this.lamp();
     this.lampLight.visible = lit;
     this.lampLight.position.set(L.x + V.lampOffset[0], -L.y + V.lampOffset[1], L.z + V.lampOffset[2]);   // a little in front, so he is not blown out
+    const reach = this.lightRadius() / RULES.basicLight; this.lampLight.distance = this.lampFill.distance = V.lampDistance * reach;   // oil widens the light
     this.lampLight.intensity = V.lampIntensity * (1 - V.lampFill) * (1 + 0.04 * Math.sin(this.clock * 9));
     this.lampFill.visible = lit; this.lampFill.position.copy(this.lampLight.position); this.lampFill.intensity = V.lampIntensity * V.lampFill;
     this.lampGlow.visible = lit; this.lampGlow.position.set(L.x, -L.y, L.z + 2); this.lampGlow.material.opacity = V.lampHalo * (1 + 0.08 * Math.sin(this.clock * 11));
@@ -885,16 +948,21 @@ class Game {
     // deposits: the pulse, the shimmer, the crack on the one you chose
     for (const n of this.nodes) {
       const s = n.baseScale * (0.6 + 0.4 * n.hp) * (n.flash > 0 ? 1.1 : 1); n.obj.scale.setScalar(s);
-      if (n.kind === 'bitcoin') {
+      if (n.kind === 'amber') {
         const pulse = 0.7 + 0.3 * Math.sin((this.clock / S.bitcoinPulseSeconds) * Math.PI * 2 + n.id);
-        n.mats.forEach((mt) => { mt.emissiveIntensity = V.bitcoinEmissive[n.zone] * pulse * (n.flash > 0 ? 2 : 1); });
-        n.glim.material.opacity = S.glimmer * 1.3 * pulse * (0.6 + 0.4 * n.hp);
+        const inLight = Math.hypot(n.x - L.x, n.y - L.y) < this.lightRadius() * T;
+        n.mats.forEach((mt) => { mt.emissiveIntensity = V.amberEmissive[n.zone] * pulse * (n.flash > 0 ? 2 : 1); });
+        n.glim.material.opacity = (inLight ? 0.35 : S.glimmer) * pulse * (0.6 + 0.4 * n.hp);   // only faintly outside the lamplight
+      } else if (n.kind === 'vault') {   // it gives nothing away: seen only inside his own lamplight
+        const inLight = Math.hypot(n.x - L.x, n.y - L.y) < this.lightRadius() * T * 0.9;
+        n.obj.visible = inLight; n.obj.userData.inner.intensity = 6 * (0.85 + 0.15 * Math.sin(this.clock * 1.3));
       } else if (n.kind === 'silver') {
         const w = S.silverShimmerSpeed * this.clock + n.id;
         n.glim.material.opacity = S.silverShimmer * (0.55 + 0.45 * Math.sin(w) * Math.sin(w * 1.73 + 1));
       }
     }
     this.drawCrack();
+    this.hum(L);
     this.drawFog(L, lit);
     // sparks
     const sp2 = this.sparks, pos = sp2.pts.geometry.attributes.position, col = sp2.pts.geometry.attributes.color;
@@ -941,8 +1009,24 @@ class Game {
     }
     p.needsUpdate = true; this.crackLine.geometry.setDrawRange(0, 66);
   }
+  hum(L) {
+    const v = this.mine && this.mine.vault; if (!v) return;
+    const ctx = !Sound.muted() && Sound.unlock && this.humReady ? this.humCtx : null;
+    const d = Math.hypot(v.x - L.x, (v.base - 20) - L.y), loud = this.below() ? clamp(1 - d / V.humRange, 0, 1) : 0;
+    if (!ctx) { if (!this.humReady && !Sound.muted() && this.below()) this.startHum(); return; }
+    this.humGain.gain.setTargetAtTime(Sound.muted() ? 0 : 0.18 * loud * loud, ctx.currentTime, 0.4);
+  }
+  startHum() {
+    const ctx = Sound.unlock(); if (!ctx || ctx.state !== 'running') return;
+    this.humCtx = ctx; this.humGain = ctx.createGain(); this.humGain.gain.value = 0;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 220;
+    for (const [f, a] of [[41, 0.6], [61.5, 0.35], [82.4, 0.2]]) { const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sawtooth'; o.frequency.value = f; g.gain.value = a; o.connect(g).connect(lp); o.start(); }
+    const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 0.23; lg.gain.value = 60; lfo.connect(lg).connect(lp.frequency); lfo.start();
+    lp.connect(this.humGain).connect(ctx.destination);
+    this.humReady = true;
+  }
   drawFog(L, lit) {
-    const f = this.fog, c = S.fogCell, R = S.lightRadius * T, d = f.img.data, dim = lit ? S.fogVisited : S.fogVisitedLampOut;
+    const f = this.fog, c = S.fogCell, R = this.lightRadius() * T, d = f.img.data, dim = lit ? S.fogVisited : S.fogVisitedLampOut;
     for (let j = 0; j < f.rows; j++) {
       const y = f.y0 + (j + 0.5) * c;
       for (let i = 0; i < f.cols; i++) {
@@ -975,11 +1059,24 @@ class Game {
       for (const ev of ['pointerdown', 'keydown']) sl.addEventListener(ev, (e) => e.stopPropagation());
       $('speedBox').style.display = 'flex';
     }
-    $('drop').onclick = () => { const p = this.bag.pop(); if (p) { Sound.tick(); this.say('Dropped ' + (p.kind === 'bitcoin' ? p.sats + ' sats' : '1 ' + p.kind), 1.5); } };
+    $('drop').onclick = () => this.drop();
+    ['shopBtn', 'shopClose', 'buyKit', 'buyLamp', 'buyOil'].forEach((id) => $(id).addEventListener('pointerdown', stop));
+    $('shopBtn').onclick = () => this.openShop();
+    $('shopClose').onclick = () => { $('shop').style.display = 'none'; this.overlay = false; };
+    $('buyKit').onclick = () => { if (this.purse.buyKit(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
+    $('buyLamp').onclick = () => { if (this.purse.buyLamp(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
+    $('buyOil').onclick = () => {
+      if (this.below() || this.lampLit) { this.say('Oil is bought before you go down.', 2); return; }
+      if (this.oilLeft >= RULES.oilMaxMeasures) return;
+      if (this.purse.buyOil(this.eco, 1)) { this.oilLeft += 1; Sound.tick(); this.saveMoney(); }
+      this.openShop();
+    };
+    $('catch').textContent = 'Blocks come at random, every ten minutes on average. The chance one lands within ' +
+      RULES.catchRates.map(([s, p]) => (s < 60 ? s + ' s' : s / 60 + ' min') + ': ' + p).join(' · ') + '.';
     $('recBtn').onclick = () => {
       const r = records.get();
       $('rShifts').textContent = r.shifts; $('rDeep').textContent = r.deepestLevel;
-      $('rCaught').textContent = r.timesCaught; $('rPoints').textContent = r.totalPoints;
+      $('rCaught').textContent = r.timesCaught; $('rPoints').textContent = r.totalPoints; $('rVault').textContent = r.vaultPieces || 0;
       $('rMinerals').textContent = mineralText(r.minerals || {}) || 'none';
       $('recMode').textContent = TEST ? '(test mode)' : '(live chain)';
       $('modeBtn').textContent = TEST ? 'Back to live chain' : 'Switch to test mode';
@@ -988,6 +1085,15 @@ class Game {
     $('recClose').onclick = () => { $('records').style.display = 'none'; this.overlay = false; };
     $('modeBtn').onclick = () => { location.search = TEST ? '' : '?test'; };
     $('ovBtn').onclick = () => { $('overlay').style.display = 'none'; this.overlay = false; };
+  }
+  openShop() {
+    const p = this.purse, R = RULES, onTop = !this.below() && !this.lampLit;
+    $('shopPoints').textContent = fmt(p.points); $('shopLamps').textContent = p.lamps; $('shopOil').textContent = this.oilLeft;
+    $('buyKit').style.display = p.hasKit ? 'none' : ''; $('buyKit').disabled = !p.canBuyKit();
+    $('buyLamp').style.display = p.hasKit ? '' : 'none'; $('buyLamp').disabled = p.points < R.lampPrice;
+    $('buyOil').disabled = !onTop || this.oilLeft >= R.oilMaxMeasures || p.points < R.oilPrice;
+    $('shopPot').textContent = fmt(this.eco.pot); $('shopVault').textContent = fmt(this.eco.vault);
+    $('shop').style.display = 'flex'; this.overlay = true;
   }
   showOverlay(title, text) { $('ovTitle').textContent = title; $('ovText').textContent = text; $('overlay').style.display = 'flex'; this.overlay = true; }
   say(text, seconds) { this.msg = text; this.msgUntil = performance.now() + seconds * 1000; }
@@ -998,11 +1104,12 @@ class Game {
     return r ? r.time : 0;
   }
   hud() {
-    this.set('oil', String(Math.ceil(this.oil)));
+    this.set('oil', this.oilLeft > 0 ? this.oilLeft.toFixed(1) : this.lampLit ? 'basic' : '–');
+    this.set('lamps', this.lampLit ? 'lamp lit · ' + this.purse.lamps + ' spare' : this.purse.lamps + ' lamp' + (this.purse.lamps === 1 ? '' : 's'));
     const w = this.bagWeight();
-    this.set('bagW', (+w.toFixed(1)) + '/' + S.bagCapacity);
-    this.set('bagSats', String(this.bagSats()));
-    this.set('bag', (mineralText(this.bagMinerals()) || 'no minerals') + (w >= S.bagCapacity ? ' · full' : ''));
+    this.set('bagW', w + '/' + RULES.bagCapacity);
+    this.set('bagSats', fmt(this.bagSats()));
+    this.set('bag', 'carried, not kept' + (this.bag.some((p) => p.kind === 'vault') ? ' · the Vault piece' : '') + (mineralText(this.bagMinerals()) ? ' · ' + mineralText(this.bagMinerals()) : '') + (w >= RULES.bagCapacity ? ' · full' : ''));
     { const rv = records.get(); this.set('vaultSats', String(rv.totalPoints)); this.set('vault', mineralText(rv.minerals || {}) || 'no minerals'); }   // banked so far
     const r = records.get(), firstShift = r.shifts < S.keysHintShifts || (r.shifts === S.keysHintShifts && this.inShift);
     $('keys').style.display = firstShift ? '' : 'none';
