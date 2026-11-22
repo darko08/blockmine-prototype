@@ -40,7 +40,7 @@ const V = {
   amberEmissive: [0.35, 0.55, 0.8, 1.1],    // amber (the sats) glows more the deeper it lies
   vaultMonHeight: 120, vaultMonZ: -880, vaultMonSide: 0.5, vaultHalf: 15000,
   vaultPaintWidth: 2200, vaultPaintFloor: 0.88, vaultPaintTop: 0.08, vaultPaintX: 0, vaultScale: 20000,
-  stormCrop: 0.62, porterSize: 0.07, porterEvery: 2.6, boltEvery: 14,   // the storm: how much of the painting shows, porters' size and pace, lightning   // the painted Vault: share of the view's width, gap under the top bar   // the painted Vault: its width, where its floor meets the ground, how it fills
+  stormCrop: 0.62, porterSize: 0.07, porterEvery: 17, boltEvery: 14,   // the storm: how much of the painting shows, porters' size and pace, lightning   // the painted Vault: share of the view's width, gap under the top bar   // the painted Vault: its width, where its floor meets the ground, how it fills
   vaultMonUnused: 0,   // the Great Vault on the surface: its height, its depth (just before the sky), how far left in the view
   ghostMiners: 100, ghostSeed: 15000,                      // practice: a simulated crowd this size; the Vault starts where it keeps it
   ghostTricklePerBlock: 410, ghostKnockPerBlock: 190, ghostPiecesPerBlock: 0.49,   // its flows, from the simulator's projection
@@ -692,7 +692,7 @@ class Game {
       return;
     }
     if (kind === 'knock') {   // the bags of the caught: a line of porters, each with his share
-      const n = Math.min(24, 6 + Math.round(Math.log2(1 + amount) * 1.5));
+      const n = Math.min(5, 2 + Math.round(Math.log10(1 + amount)));   // a few heavy loads, not a crowd
       for (let i = 0; i < n; i++) this.vs.queue.push(amount / n);
       if (!this.below()) this.say('The knock: ' + fmt(amount) + ' sats from the caught are carried up to the Vault.', 3);
       return;
@@ -704,13 +704,13 @@ class Game {
     const mat = new THREE.SpriteMaterial({ map: this.porterTex[0], transparent: true, depthWrite: false, opacity: 0, toneMapped: false, side: THREE.DoubleSide })   // double-sided: a mirrored sprite would be culled;
     const s = new THREE.Sprite(mat), h = this.vaultDims.Hp * V.porterSize; s.scale.set(h * 0.66, h, 1); s.center.set(0.5, 0.08);
     s.renderOrder = -1; this.vaultMon.add(s);
-    this.porters.push({ s, d: down ? this.porterTotal : 0, carry, down, speed: this.porterTotal / (down ? 14 : 26) * (0.85 + Math.random() * 0.3), step: Math.random() });
+    this.porters.push({ s, d: down ? this.porterTotal : 0, carry, down, speed: this.porterTotal / (down ? 30 : 50) * (0.85 + Math.random() * 0.3), step: Math.random(), rest: 0, leg: -1 });
   }
   porterAt(d) {   // a point on the way, and which way it runs there
     const P = this.porterPath, Ls = this.porterLen;
     let i = 0; while (i < Ls.length - 1 && d > Ls[i]) i++;
     const a = P[i], b = P[i + 1], l0 = i ? Ls[i - 1] : 0, f = Math.min(1, Math.max(0, (d - l0) / (Ls[i] - l0)));
-    return { p: a.clone().lerp(b, f), dx: b.x - a.x, onStairs: i >= 2 };
+    return { p: a.clone().lerp(b, f), dx: b.x - a.x, onStairs: i >= 2, leg: i };
   }
   vaultShowStep(dt) {
     if (!this.vaultMon) return;
@@ -720,18 +720,22 @@ class Game {
     // a steady line: a porter every few seconds with whatever has trickled in; faster while the knock's bags go up
     this.vs.spawn -= dt;
     if (this.vs.spawn <= 0) {
-      if (this.vs.queue.length) { this.porter(this.vs.queue.shift(), false); this.vs.spawn = 0.45 + Math.random() * 0.3; }
+      if (this.vs.queue.length) { this.porter(this.vs.queue.shift(), false); this.vs.spawn = 6 + Math.random() * 3; }
       else { this.porter(this.vs.pending, false); this.vs.pending = 0; this.vs.spawn = V.porterEvery * (0.7 + Math.random() * 0.6); }
     }
     this.porters = this.porters.filter((q) => {
-      q.d += (q.down ? -1 : 1) * q.speed * dt * (this.porterAt(q.d).onStairs ? 0.7 : 1);   // slower on the stairs
+      // a burden: each step a heave and a sag, slower on the stairs, and a rest on each landing to catch his breath
+      const here = this.porterAt(q.d);
+      if (here.leg !== q.leg) { if (q.leg >= 0 && here.onStairs && !q.down) q.rest = 1.2 + Math.random() * 2; q.leg = here.leg; }
+      if (q.rest > 0) q.rest -= dt;
+      else { q.step += dt * 1.1; const heave = Math.pow(Math.sin(q.step * Math.PI), 2); q.d += (q.down ? -1 : 1) * q.speed * dt * (here.onStairs ? 0.55 : 1) * (0.25 + 1.5 * heave); }
       const end = q.down ? q.d <= 0 : q.d >= this.porterTotal;
       if (end) { this.vaultMon.remove(q.s); q.s.material.dispose(); if (!q.down) { this.vs.shown += q.carry; if (q.carry) this.vs.flash = Math.min(1, this.vs.flash + 0.12); } return false; }
       const at = this.porterAt(q.d), dir = (q.down ? -1 : 1) * Math.sign(at.dx || 1);
-      q.step += dt * 2.6; const frame = Math.floor(q.step * 2) % 2;
+      const frame = Math.floor(q.step) % 2;
       if (q.s.material.map !== this.porterTex[frame]) { q.s.material.map = this.porterTex[frame]; q.s.material.needsUpdate = true; }
-      q.s.position.copy(at.p); q.s.position.y += Math.abs(Math.sin(q.step * Math.PI)) * this.vaultDims.Hp * 0.002;
-      q.s.scale.x = Math.abs(q.s.scale.x) * (dir < 0 ? -1 : 1);
+      q.s.position.copy(at.p); q.s.position.y -= (q.rest > 0 ? 1 : Math.abs(Math.cos(q.step * Math.PI))) * this.vaultDims.Hp * 0.003;   // he sinks under the load between steps, and while he rests
+      q.s.scale.x = Math.abs(q.s.scale.x) * (dir < 0 ? -1 : 1); q.s.material.rotation = (dir < 0 ? 1 : -1) * (q.down ? 0 : 0.12 + (q.rest > 0 ? 0.08 : 0));   // bent forward under the sack
       const fadeIn = Math.min(1, (q.down ? this.porterTotal - q.d : q.d) / (this.porterTotal * 0.04)), fadeOut = Math.min(1, (q.down ? q.d : this.porterTotal - q.d) / (this.porterTotal * 0.03));
       q.s.material.opacity = Math.min(fadeIn, fadeOut) * (up ? 1 : 0);
       return true;
