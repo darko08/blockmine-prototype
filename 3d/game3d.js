@@ -474,9 +474,25 @@ class Game {
   // gold coins: they burst out of a broken amber pile, bounce, then sweep into his bag (carried, not kept)
   buildCoins() {
     const N = this.coinMax = 160;
-    const geo = new THREE.CylinderGeometry(4.6, 4.6, 0.9, 16); geo.rotateX(Math.PI / 2);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xffc33a, metalness: 0.95, roughness: 0.28, emissive: 0x8a5000, emissiveIntensity: 0.7 });
+    // a rough chunk: an icosahedron pulled out of shape, flat faces, darker where the facets meet like cracks
+    let geo = new THREE.IcosahedronGeometry(3.4, 0).toNonIndexed();
+    const pos = geo.attributes.position, r = seededRandom('amber-nugget'), bend = new Map();
+    for (let i = 0; i < pos.count; i++) {
+      const key = [pos.getX(i), pos.getY(i), pos.getZ(i)].map((v) => v.toFixed(3)).join();   // shared corners move together
+      if (!bend.has(key)) bend.set(key, [0.7 + r() * 0.6, 0.6 + r() * 0.5, 0.75 + r() * 0.5]);
+      const k = bend.get(key); pos.setXYZ(i, pos.getX(i) * k[0] * 1.15, pos.getY(i) * k[1], pos.getZ(i) * k[2]);
+    }
+    const col = new Float32Array(pos.count * 3);
+    for (let f = 0; f < pos.count; f += 3) {   // each facet its own heat: most glow, a few are dark crust
+      const hot = r() < 0.22 ? 0.25 + r() * 0.2 : 0.8 + r() * 0.2;
+      for (let v = 0; v < 3; v++) { const edge = v === 0 ? 0.75 : 1; col.set([hot * edge, hot * edge, hot * edge], (f + v) * 3); }
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.computeVertexNormals();
+    // lit from inside, so it glows in the dark whatever the lamp does; the per-nugget colour sets how hot it is
+    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
     this.coinMesh = new THREE.InstancedMesh(geo, mat, N); this.coinMesh.frustumCulled = false; this.coinMesh.count = 0;
+    this.coinMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
+    this.coinHot = new THREE.Color(1.55, 0.58, 0.1); this.coinCool = new THREE.Color(0.62, 0.16, 0.03); this.coinTmp = new THREE.Color();
     this.scene.add(this.coinMesh);
     this.coinList = []; this.coinDummy = new THREE.Object3D(); this.clinkT = 0;
   }
@@ -487,7 +503,8 @@ class Game {
     for (let i = 0; i < n && this.coinList.length < this.coinMax; i++) {
       const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, s = (big ? 150 : 95) + Math.random() * 90;
       this.coinList.push({ x, y, z: z + (Math.random() - 0.5) * 8, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: (Math.random() - 0.5) * 30, floor: fy - 1.2,
-        rx: Math.random() * 6, ry: Math.random() * 6, sx: (Math.random() - 0.5) * 22, sy: (Math.random() - 0.5) * 22, t: 0, fly, flyAt: 0.55 + i * 0.025, bounces: 0 });
+        rx: Math.random() * 6, ry: Math.random() * 6, sx: (Math.random() - 0.5) * 16, sy: (Math.random() - 0.5) * 16, t: 0, fly, flyAt: 0.55 + i * 0.025, bounces: 0,
+        size: (big && i < 6 ? 1.7 : 0.65 + Math.random() * 0.6), heat: 1, trailT: 0 });
     }
     this.clink(Math.min(6, 1 + Math.floor(n / 5)), big);
   }
@@ -501,33 +518,55 @@ class Game {
         const f = Math.min(1, (c.t - c.flyAt) / 0.32);
         if (!c.from) c.from = { x: c.x, y: c.y, z: c.z };
         c.x = c.from.x + (bx - c.from.x) * f; c.y = c.from.y + (by - c.from.y) * f - Math.sin(f * Math.PI) * 26; c.z = c.from.z * (1 - f) + 6 * f;
+        c.heat = Math.min(1, c.heat + dt * 4);   // it flares as it is gathered
         if (f >= 1) { landed++; return false; }
       } else {
         c.vy += S.gravity * 2.2 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.z += c.vz * dt;
-        if (c.y > c.floor && c.vy > 0) { c.y = c.floor; c.vy *= -0.38; c.vx *= 0.6; c.sx *= 0.6; c.bounces++; if (c.bounces === 1 && Math.random() < 0.3) this.clink(1); }
+        if (c.y > c.floor && c.vy > 0) { c.y = c.floor; c.vy *= -0.28; c.vx *= 0.45; c.sx *= 0.4; c.sy *= 0.4; c.bounces++; if (c.bounces === 1 && Math.random() < 0.35) this.clink(1); }
+        if (c.bounces) c.heat = Math.max(0.35, c.heat - dt * 1.4);   // cooling where it lies
         if (!c.fly && c.t > 1.6) return false;
       }
       c.rx += c.sx * dt; c.ry += c.sy * dt;
       d.position.set(c.x, -c.y, c.z); d.rotation.set(c.rx, c.ry, 0);
-      const fade = !c.fly && c.t > 1.2 ? 1 - (c.t - 1.2) / 0.4 : 1; d.scale.setScalar(Math.max(0.05, fade));
-      d.updateMatrix(); this.coinMesh.setMatrixAt(k++, d.matrix);
+      const fade = !c.fly && c.t > 1.2 ? 1 - (c.t - 1.2) / 0.4 : 1; d.scale.setScalar(Math.max(0.05, fade) * c.size);
+      d.updateMatrix(); this.coinMesh.setMatrixAt(k, d.matrix);
+      this.coinTmp.copy(this.coinCool).lerp(this.coinHot, c.heat * fade); this.coinMesh.setColorAt(k, this.coinTmp); k++;
+      // a faint glowing trail while it is in the air
+      c.trailT -= dt;
+      if (c.trailT <= 0 && (!c.bounces || c.from) && c.heat > 0.6) { c.trailT = 0.03; this.trail(c.x, c.y, c.z); }
       return true;
     });
-    this.coinMesh.count = k; this.coinMesh.instanceMatrix.needsUpdate = true;
+    this.coinMesh.count = k; this.coinMesh.instanceMatrix.needsUpdate = true; if (this.coinMesh.instanceColor) this.coinMesh.instanceColor.needsUpdate = true;
     if (landed) { this.bagPop = 0.18; if (Math.random() < 0.5) this.clink(1); }
   }
-  // a coin's clink: two bright partials that ring and die, a little different each time
+  trail(x, y, z) {
+    const S2 = this.sparks, p = S2.p[S2.next++ % S2.n];
+    Object.assign(p, { x: x + (Math.random() - 0.5) * 2, y: -y + (Math.random() - 0.5) * 2, z, vx: 0, vy: 8, life: 0.22 + Math.random() * 0.12 }); p.max = p.life;
+    p.c.set(Math.random() < 0.5 ? 0xff8a2a : 0xffc060);
+  }
+  // amber chunks landing: a dry stone click with a soft hot hiss, a little different each time
   clink(n, big) {
     if (Sound.muted() || !Sound.unlock) return;
     const ctx = Sound.unlock(); if (!ctx || ctx.state !== 'running') return;
     const now = ctx.currentTime;
+    if (!this.clickBuf || this.clickBuf.sampleRate !== ctx.sampleRate) {   // a short burst of noise, made once
+      const len = Math.floor(ctx.sampleRate * 0.25), b = ctx.createBuffer(1, len, ctx.sampleRate), d = b.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      this.clickBuf = b;
+    }
     for (let i = 0; i < n; i++) {
-      const t = now + i * (0.035 + Math.random() * 0.05), f = (big ? 2300 : 2900) + Math.random() * 900;
-      for (const [m, g] of [[1, 0.06], [2.76, 0.035]]) {
-        const o = ctx.createOscillator(), a = ctx.createGain();
-        o.type = 'sine'; o.frequency.value = f * m;
-        a.gain.setValueAtTime(0, t); a.gain.linearRampToValueAtTime(g, t + 0.003); a.gain.exponentialRampToValueAtTime(0.0001, t + 0.18 + Math.random() * 0.12);
-        o.connect(a).connect(ctx.destination); o.start(t); o.stop(t + 0.35);
+      const t = now + i * (0.03 + Math.random() * 0.05);
+      // the click: noise through a narrow band, gone in a few hundredths of a second
+      const src = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+      src.buffer = this.clickBuf; bp.type = 'bandpass'; bp.frequency.value = (big ? 1300 : 1900) + Math.random() * 1400; bp.Q.value = 6;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.5, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045 + Math.random() * 0.03);
+      src.connect(bp).connect(g).connect(ctx.destination); src.start(t, Math.random() * 0.1, 0.1);
+      // the hiss: soft and high, a hot stone meeting cold rock
+      if (i === 0) {
+        const h = ctx.createBufferSource(), hp = ctx.createBiquadFilter(), hg = ctx.createGain();
+        h.buffer = this.clickBuf; hp.type = 'highpass'; hp.frequency.value = 4500;
+        hg.gain.setValueAtTime(0, t); hg.gain.linearRampToValueAtTime(big ? 0.05 : 0.03, t + 0.02); hg.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+        h.connect(hp).connect(hg).connect(ctx.destination); h.start(t);
       }
     }
   }

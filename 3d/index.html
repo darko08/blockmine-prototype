@@ -86,8 +86,10 @@
   #vaultSats { color: #ffb547; } #vaultSats.neg { color: #e0705a; } #vaultSats.pos { color: #8fd17a; }
   #bagSats.past { color: #ffd76a; text-shadow: 0 0 8px rgba(255,200,80,.8), 0 1px 2px #000; }
   .cell.flash .bar { animation: banked 1.6s ease-out; }
-  .coinFly { position: fixed; width: 14px; height: 14px; border-radius: 50%; pointer-events: none; z-index: 8;
-    background: radial-gradient(circle at 35% 30%, #fff6c8 0, #ffd04a 35%, #c98a12 75%, #7a4a00 100%); box-shadow: 0 0 6px rgba(255,190,60,.9); }
+  /* amber chips flying into Net at the hatch: a rough glowing chunk */
+  .coinFly { position: fixed; width: 13px; height: 12px; pointer-events: none; z-index: 8;
+    clip-path: polygon(30% 0, 78% 8%, 100% 45%, 82% 92%, 35% 100%, 4% 70%, 0 28%);
+    background: radial-gradient(circle at 40% 35%, #fff0b0 0, #ffae3a 30%, #e2610e 70%, #6a2200 100%); filter: drop-shadow(0 0 5px rgba(255,140,40,.95)); }
   #vaultCell.flash .bar { animation: banked 1.6s ease-out; }
   @keyframes banked { 0% { box-shadow: 0 0 0 2px #ffb547, 0 0 28px 6px rgba(255,181,71,.8); } 100% { box-shadow: inset 0 0 0 3px rgba(0,0,0,.75), inset 0 0 0 4px rgba(176,141,87,.45), 0 2px 8px rgba(0,0,0,.6); } }
   @media (max-width: 640px), (max-height: 500px) { #vaultCell small { display: none; } #left { flex-wrap: wrap; row-gap: 4px; min-width: 0; } }
@@ -199,6 +201,6 @@
 <script src="rules3d.js?v=4"></script>
 <script src="mine3d.js?v=3"></script>
 <script src="economy3d.js?v=2"></script>
-<script type="module" src="game3d.js?v=36"></script>
+<script type="module" src="game3d.js?v=38"></script>
 </body>
 </html>
