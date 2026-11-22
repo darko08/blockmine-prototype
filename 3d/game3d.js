@@ -21,7 +21,8 @@ const V = {
   depth: 2.3 * T,            // how deep the tunnels go into the rock, front to back
   viewHeight: S.minerHeight / S.minerScreenShare,   // world units the camera shows top to bottom, as in 2D
   fov: 32, tilt: 0.07,       // camera: field of view, and a slight look down
-  lampIntensity: 120, lampDistance: S.lightRadius * T * 2.6, lampDecay: 1, lampOffset: [0, 18, 42], lampColor: 0xffa24a,
+  lampIntensity: 120, lampDistance: S.lightRadius * T * 2.6, lampDecay: 1, lampOffset: [0, 18, 42], lampColor: 0xffc890,   // an oil flame: warm, but closer to white than to yellow
+  lampHalo: 0.1, flameSize: 0.05,
   ambient: 0.55,             // what lets the fog's "seen" areas stay dimly visible
   moon: 1.1,                 // light on the surface at night
   rockTex: 256,              // world units per repeat of the rock paintings
@@ -331,8 +332,12 @@ class Game {
     if (this.A.models.lantern) {
       this.beltLamp = place(this.A.models.lantern, H * V.lampSize, { cast: false });
       this.beltLamp.position.y = -H * V.lampSize; this.lampPivot.add(this.beltLamp);
+      this.lampMats = [];
+      this.beltLamp.traverse((m) => { if (m.isMesh) { m.material = m.material.clone(); m.material.emissive = new THREE.Color(0xffd6a0); m.material.emissiveMap = m.material.map; m.material.needsUpdate = true; this.lampMats.push(m.material); } });
+      // a small flame inside the glass
+      this.flame = this.glowSprite(0xffe2b0, H * V.flameSize * 2, 0.9); this.flame.position.set(0, -H * V.lampSize * 0.58, 0); this.lampPivot.add(this.flame);
     }
-    this.lampGlow = this.glowSprite(0xff9a30, S.lightRadius * T * 1.5, 0.22); this.scene.add(this.lampGlow);
+    this.lampGlow = this.glowSprite(0xffb070, S.lightRadius * T * 1.2, V.lampHalo); this.scene.add(this.lampGlow);
     // the pick: a wooden handle and an iron head, swung from the shoulder in time with the swing animation
     const wood = fogged(new THREE.MeshStandardMaterial({ color: 0x8a6440, roughness: 0.9 }));
     const iron = fogged(new THREE.MeshStandardMaterial({ color: 0x5d5853, roughness: 0.55, metalness: 0.6 }));
@@ -779,8 +784,10 @@ class Game {
     this.lampLight.visible = lit;
     this.lampLight.position.set(L.x + V.lampOffset[0], -L.y + V.lampOffset[1], L.z + V.lampOffset[2]);   // a little in front, so he is not blown out
     this.lampLight.intensity = V.lampIntensity * (1 + 0.04 * Math.sin(this.clock * 9));
-    this.lampGlow.visible = lit; this.lampGlow.position.set(L.x, -L.y, L.z + 2); this.lampGlow.material.opacity = S.lampWarmth * 0.55;
-    if (this.beltLamp) this.beltLamp.traverse((m) => { if (m.isMesh) { m.material.emissive = new THREE.Color(0xffa040); m.material.emissiveIntensity = lit ? 0.5 : 0; } });
+    this.lampGlow.visible = lit; this.lampGlow.position.set(L.x, -L.y, L.z + 2); this.lampGlow.material.opacity = V.lampHalo * (1 + 0.08 * Math.sin(this.clock * 11));
+    const flick = 1 + 0.06 * Math.sin(this.clock * 13) + 0.04 * Math.sin(this.clock * 29 + 1);
+    if (this.lampMats) this.lampMats.forEach((mt) => { mt.emissiveIntensity = lit ? 0.55 * flick : 0; });
+    if (this.flame) { this.flame.visible = lit; this.flame.scale.setScalar(H * V.flameSize * 2 * flick); }
     this.lid.visible = this.hatch !== 'open';
     // deposits: the pulse, the shimmer, the crack on the one you chose
     for (const n of this.nodes) {
