@@ -34,7 +34,8 @@ const V = {
   lampHook: [0.04, 0.02, 0.15],   // the belt hook, from his hips: forward, up, to his right (shares of his height)
   turnRate: 7,               // how quickly he turns to face a new way (higher = snappier)
   pickLength: 0.48,          // the pick, end to end, as a share of his height (a real pick is about 0.9 m)
-  bagBack: 0.09,             // how far behind his chest bone the bag hangs (his back is about 0.1 behind it)
+  bagBack: 0.0,              // the strap's top: right over his shoulders, level with his chest bone front to back
+  bagUp: 0.17, bagLean: -0.38, bagSwing: 0.5,   // the strap's top above his chest bone; the sack leans back onto his back; it swings half as freely
   pileScale: 1.3,            // 3D deposit piles are this much taller than the 2D pile heights (their base is wide rubble)
   walkStride: 50,            // world units per cycle of the Mixamo walk (a man 1.8 m tall: about 1.65 m)
   climbStride: 18,           // world units climbed per cycle of the Mixamo ladder climb (about two rungs)
@@ -272,12 +273,33 @@ class Game {
         if (t.kind === 'gap') {
           const pit = new THREE.Mesh(new THREE.BoxGeometry(t.x1 - t.x0, S.pitDepth * T, D * 0.98), fogged(new THREE.MeshStandardMaterial({ color: 0x050302, roughness: 1 })));
           pit.position.set((t.x0 + t.x1) / 2, -(fy + S.pitDepth * T / 2) + 0.6, 0); pit.userData.own = true; this.world.add(pit);
+          // so the hole reads in the dark: pale broken edges on both sides and a faint red glow far down
+          const rim = fogged(new THREE.MeshStandardMaterial({ color: 0x8c7f72, roughness: 0.95, flatShading: true })), r3 = seededRandom(m.hash + '|pit' + t.x0);
+          for (const x of [t.x0, t.x1]) for (let k = 0; k < 7; k++) {   // broken stones along both lips
+            const st = new THREE.Mesh(new THREE.DodecahedronGeometry(1.4 + r3() * 1.2, 0), rim);
+            st.position.set(x + (r3() - 0.5) * 3, -fy + 0.6, (k / 6 - 0.5) * D * 0.85); st.scale.set(1.3, 0.55, 1); st.rotation.set(r3() * 3, r3() * 3, r3() * 3);
+            st.castShadow = st.receiveShadow = true; st.userData.own = true; this.world.add(st);
+          }
+          if (!this.pitTex) {   // black at the lips, a dim ember glow from far down in the middle
+            const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+            const gr = x.createRadialGradient(32, 32, 2, 32, 32, 32); gr.addColorStop(0, '#6a1a06'); gr.addColorStop(0.55, '#260803'); gr.addColorStop(1, '#000000');
+            x.fillStyle = gr; x.fillRect(0, 0, 64, 64); this.pitTex = new THREE.CanvasTexture(c); this.pitTex.colorSpace = THREE.SRGBColorSpace;
+          }
+          const glow = new THREE.Mesh(new THREE.PlaneGeometry(t.x1 - t.x0, D * 0.98), fogged(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: this.pitTex, emissiveIntensity: 1 })));
+          glow.rotation.x = -Math.PI / 2; glow.position.set((t.x0 + t.x1) / 2, -fy + 0.7, 0); glow.userData.own = true; this.world.add(glow);
         } else {
-          const r2 = seededRandom(m.hash + '|rubble' + t.x0), mat = fogged(new THREE.MeshStandardMaterial({ map: this.A.rock[G.zone(l)], color: 0x8a7f72, roughness: 1 }));
-          for (let k = 0; k < 9; k++) {
-            const s = (t.x1 - t.x0) * (0.18 + 0.16 * r2()), st = new THREE.Mesh(new THREE.DodecahedronGeometry(s / 2, 0), mat);
-            st.position.set(t.x0 + (t.x1 - t.x0) * (0.15 + 0.7 * r2()), -(fy + 2) + s * 0.35 * (0.6 + r2() * 0.6) * (t.h / S.rubbleHeight), (r2() - 0.5) * D * 0.8);
-            st.rotation.set(r2() * 3, r2() * 3, r2() * 3); st.castShadow = st.receiveShadow = true; st.userData.own = true; this.world.add(st);
+          const r2 = seededRandom(m.hash + '|rubble' + t.x0), mat = fogged(new THREE.MeshStandardMaterial({ color: 0x6f655b, roughness: 0.9, flatShading: true }));
+          // a heap of rocks as tall as the mound that blocks him, across the whole depth of the tunnel, so it reads as a
+          // barrier to jump over: bigger stones at the bottom and middle, smaller ones on top
+          // drawn as the 2D game draws it: about twice the height that stops him, and 1.4 times as wide
+          const w = (t.x1 - t.x0) * 1.4, cx = (t.x0 + t.x1) / 2, n = 30, top = t.h * 2.0;
+          for (let k = 0; k < n; k++) {
+            const u = (r2() - 0.5) * 2, z = (r2() - 0.5) * D * 0.9, peak = top * (1 - 0.6 * u * u);
+            const r = Math.max(2.5, top * (0.2 + 0.14 * r2()) * (1 - 0.35 * Math.abs(u)));
+            const st = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), mat);
+            st.position.set(cx + u * w * 0.5, -(fy - Math.max(r * 0.55, peak - r * 0.7 - r2() * top * 0.3)), z);
+            st.scale.set(1.25, 0.8, 1); st.rotation.set(r2() * 3, r2() * 3, r2() * 3);
+            st.castShadow = st.receiveShadow = true; st.userData.own = true; this.world.add(st);
           }
         }
       }
@@ -366,7 +388,7 @@ class Game {
     this.bags = {};
     for (const [k, h] of [['empty', 0.46], ['half', 0.5], ['full', 0.56]]) {
       const holder = new THREE.Group(), o = place(this.A.models['bag_' + k], H * h, { cloneMat: true });
-      o.rotation.y = -Math.PI / 2 + 0.35;   // its front faces backward, turned a little toward you
+      o.rotation.y = -Math.PI / 2;   // its front faces backward
       o.position.y = -H * h; holder.userData.h = h;   // the holder is the strap's top, at his shoulder
       holder.add(o); holder.visible = false; g.add(holder);
       holder.userData.mats = []; o.traverse((m) => m.isMesh && holder.userData.mats.push(m.material));
@@ -562,7 +584,10 @@ class Game {
     let best = -1, bd = Infinity;
     m.ladders.forEach((d, k) => {
       const dx = Math.abs(m.G.colX(d.c) - this.mx);
-      if ((d.top === this.lvl || d.bottom === this.lvl) && dx <= S.grabRange * T && dx < bd) { best = k; bd = dx; }
+      if (!(d.top === this.lvl || d.bottom === this.lvl) || dx > S.grabRange * T) return;
+      const goesDown = d.top === this.lvl, wantDown = !this.keys.up;
+      const score = dx - (goesDown === wantDown ? 0.5 * T : 0);   // two ladders at one spot: take the one going your way
+      if (score < bd) { best = k; bd = score; }
     });
     if (best >= 0) return { kind: 'ladder', k: best };
     const near = this.nodes.filter((n) => n.l === this.lvl && Math.abs(n.x - this.mx) <= (S.oreStandGap + S.mineRange) * T)
@@ -608,17 +633,25 @@ class Game {
       }
       if (dir && !this.mining) {
         this.facing = dir;
-        const nx = clamp(this.blockRubble(this.lvl, this.mx, this.mx + dir * S.runSpeed * f * dt, fy), x0, x1);
+        const want = this.mx + dir * S.runSpeed * f * dt, nx = clamp(this.blockRubble(this.lvl, this.mx, want, fy), x0, x1);
+        if (Math.abs(nx - want) > 1e-6 && nx === this.blockRubble(this.lvl, this.mx, want, fy) && performance.now() > (this.rubbleHintAt || 0)) {
+          this.say('Rubble in the way. Jump over it.', 2); this.rubbleHintAt = performance.now() + 4000;
+        }
         this.moving = Math.abs(nx - this.mx) > 1e-3; this.walkDist += Math.abs(nx - this.mx); this.mx = nx;
       }
       const gap = this.terrainAt(this.lvl, this.mx, 'gap');
       if (gap) this.startFall('gap', 0, gap);
+      else if (this.moving && !(this.gapHintAt > performance.now())) {
+        const ahead = this.terrainAt(this.lvl, this.mx + this.facing * 1.6 * T, 'gap');
+        if (ahead) { this.say('A hole in the floor. Jump over it.', 2); this.gapHintAt = performance.now() + 4000; }
+      }
     } else if (this.mode === 'ladder') {
       const d = this.mine.ladders[this.ladderK], y0 = this.floorY(d.top), y1 = this.floorY(d.bottom);
       const v = up ? -S.climbSpeed * f : down ? S.slideSpeed * f : 0;
       this.my += v * dt; this.climbDist += Math.abs(v * dt); this.climbV = v;
-      if (v < 0 && this.my <= y0) this.stepOff(d, true, dir);
-      else if (v > 0 && this.my >= y1) this.stepOff(d, false, dir);
+      const onward = (lvl, down) => this.mine.ladders.findIndex((e) => e !== d && (down ? e.top : e.bottom) === lvl && Math.abs(e.c - d.c) < 0.5);
+      if (v < 0 && this.my <= y0) { const k = onward(d.top, false); if (k >= 0 && !dir) { this.ladderK = k; this.my = y0 - 0.01; } else this.stepOff(d, true, dir); }
+      else if (v > 0 && this.my >= y1) { const k = onward(d.bottom, true); if (k >= 0 && !dir) { this.ladderK = k; this.my = y1 + 0.01; } else this.stepOff(d, false, dir); }
       else this.my = clamp(this.my, y0, y1);
       if (this.mode === 'ladder' && dir && (this.my === y0 || this.my === y1)) this.stepOff(d, this.my === y0, dir);
     } else {
@@ -823,13 +856,13 @@ class Game {
       if (this.mode === 'ladder' && this.bones.chest) {   // both hands on the rungs: the pick rides across his back, head up by his shoulder
         const c = at(this.bones.chest), sy = up.clone().multiplyScalar(0.85).addScaledVector(right, -0.5).normalize();
         const sx = new THREE.Vector3().crossVectors(sy, face).normalize(), sz = new THREE.Vector3().crossVectors(sx, sy);
-        this.pick.matrix.makeBasis(sx, sy, sz).setPosition(c.addScaledVector(face, -H * (V.bagBack + 0.08)).addScaledVector(up, -H * 0.3).addScaledVector(right, H * 0.1));
+        this.pick.matrix.makeBasis(sx, sy, sz).setPosition(c.addScaledVector(face, -H * 0.17).addScaledVector(up, -H * 0.3).addScaledVector(right, H * 0.1));
       }
       this.pick.matrixWorldNeedsUpdate = true;
     }
     if (this.bones.chest) {   // the bag hangs from his shoulders, against his back, leaning with him
       const c = at(this.bones.chest);
-      for (const k in this.bags) { const b = this.bags[k]; b.position.copy(c).addScaledVector(face, -H * V.bagBack).addScaledVector(up, H * 0.1); b.rotation.set(this.bagRoll || 0, bodyYaw, -0.1 + (this.bagAng || 0)); }
+      for (const k in this.bags) { const b = this.bags[k]; b.position.copy(c).addScaledVector(face, -H * V.bagBack).addScaledVector(up, H * V.bagUp); b.rotation.set((this.bagRoll || 0) * V.bagSwing, bodyYaw, V.bagLean + (this.bagAng || 0) * V.bagSwing); }
     }
     // the bag on his back: flat at 0, half-full from 1, full from bagFullAt; its ore glows only with ore in it
     const bw = this.bagWeight(), fill = Math.min(1, bw / S.bagCapacity), hasOre = this.bag.length > 0;
