@@ -39,7 +39,8 @@ const V = {
   walkStride: 50,            // world units per cycle of the Mixamo walk (a man 1.8 m tall: about 1.65 m)
   climbStride: 18,           // world units climbed per cycle of the Mixamo ladder climb (about two rungs)
   swingSeconds: 1.0,         // one swing of the pick, start to recovery
-  jumpFrom: 0.55, jumpRate: 1.7,   // the jump clip: where the take-off starts (seconds), and how fast it plays
+  jumpTimes: [0.68, 1.03, 1.35, 1.75],   // the Mixamo jump clip: take-off, peak, touch-down, back up from the landing crouch (s)
+  landSeconds: 0.22,         // how long the landing crouch shows before he walks or stands again
 };
 const MODELS = ['miner', 'pick', 'dep_bitcoin', 'dep_iron', 'dep_silver', 'dep_amber', 'bag_empty', 'bag_half', 'bag_full', 'ladder', 'headframe', 'cart', 'barrel', 'crate', 'lantern', 'timber'];
 
@@ -599,7 +600,7 @@ class Game {
       const fy = this.floorY(this.lvl), [x0, x1] = MineGen.span(this.mine, this.lvl);
       if (dir && this.mining) this.mining = null;
       if (press.jump && !this.mining) {
-        this.mode = 'air'; this.vy = -Math.sqrt(2 * S.gravity * S.jumpHeight);
+        this.mode = 'air'; this.vy = -Math.sqrt(2 * S.gravity * S.jumpHeight); this.airT = 0;
         this.vx = dir * S.runSpeed * f; if (dir) this.facing = dir;
         return;
       }
@@ -711,7 +712,12 @@ class Game {
     }
     this.bag = []; this.inShift = false; this.oil = S.oilStart;
     const m = mineralText(mins);
-    if (sats || m) this.say('Banked ' + [sats ? sats + ' sats' : '', m].filter(Boolean).join(' · '), 3);
+    if (sats || m) {
+      this.say('Banked ' + [sats ? sats + ' sats' : '', m].filter(Boolean).join(' · '), 3);
+      const plus = [sats ? '+' + sats + ' sats' : '', ...Object.entries(mins).map(([k, v]) => '+' + v + ' ' + k)].filter(Boolean).join(' · ');
+      this.float(this.mine.G.colX(this.mine.c0), -S.minerHeight * 1.4, 0, plus);
+      const v = $('vaultCell'); v.classList.remove('flash'); void v.offsetWidth; v.classList.add('flash');
+    }
   }
   bagWeight() { return this.bag.reduce((a, b) => a + b.weight, 0); }
   bagSats() { return this.bag.reduce((a, b) => a + b.sats, 0); }
@@ -771,9 +777,17 @@ class Game {
       this.setAnim('climb', 0.2);
       this.acts.climb.timeScale = clamp(-this.climbV * dur('climb') / V.climbStride, -2.2, 2.2);
     }
-    else if (this.mode === 'air' && !this.falling) {
-      if (this.anim !== 'jump') { this.setAnim('jump', 0.1); this.acts.jump.time = V.jumpFrom; }
-      this.acts.jump.timeScale = V.jumpRate;
+    else if (this.mode === 'air' && !this.falling) {   // rising: take-off to peak; falling: peak to touch-down, in step with his flight
+      this.airT = (this.airT || 0) + dt; this.landT = V.landSeconds;
+      const rise = Math.sqrt(2 * S.jumpHeight / S.gravity), J = V.jumpTimes, u = this.airT / rise;
+      this.setAnim('jump', 0.08);
+      this.acts.jump.timeScale = 0;
+      this.acts.jump.time = u < 1 ? J[0] + (J[1] - J[0]) * u : J[1] + (J[2] - J[1]) * Math.min(1, u - 1);
+    }
+    else if (this.anim === 'jump' && this.landT > 0 && !this.moving) {   // the landing crouch, briefly
+      this.landT -= dt;
+      this.acts.jump.time = V.jumpTimes[2] + (V.jumpTimes[3] - V.jumpTimes[2]) * (1 - Math.max(0, this.landT) / V.landSeconds);
+      if (this.landT <= 0) this.setAnim('idle', 0.2);
     }
     else if (this.moving) { this.setAnim('walk', 0.25); this.acts.walk.timeScale = sp.walk * dur('walk') / V.walkStride; }
     else this.setAnim('idle');
@@ -786,7 +800,7 @@ class Game {
     if (this.bones.lsh && this.bones.rsh) { face.subVectors(at(this.bones.lsh), at(this.bones.rsh)).cross(up); face.y = 0; if (face.lengthSq() > 1e-6) face.normalize(); else face.set(1, 0, 0); }
     const right = new THREE.Vector3().crossVectors(face, up), bodyYaw = Math.atan2(-face.z, face.x);
     if (this.pick && this.bones.hand && this.bones.elbow) {
-      this.pick.visible = !!(this.mining || this.swingT > 0);
+      this.pick.visible = true;   // he always carries it: in his hand, or across his back on a ladder
       // held in his right fist: the handle runs through the fist (the hand bone's -Z in Mixamo's rig), the grip in the
       // middle of the fist (a little along his fingers, the bone's +Y)
       const hand = at(this.bones.hand), hq = new THREE.Quaternion(), rq = new THREE.Quaternion();
@@ -795,6 +809,11 @@ class Game {
       const x = new THREE.Vector3().crossVectors(right, y); if (x.lengthSq() < 1e-4) x.copy(fingers); x.normalize();
       const z = new THREE.Vector3().crossVectors(x, y);
       this.pick.matrix.makeBasis(x, y, z).setPosition(hand.addScaledVector(fingers, H * 0.035));
+      if (this.mode === 'ladder' && this.bones.chest) {   // both hands on the rungs: the pick rides across his back, head up by his shoulder
+        const c = at(this.bones.chest), sy = up.clone().multiplyScalar(0.85).addScaledVector(right, -0.5).normalize();
+        const sx = new THREE.Vector3().crossVectors(sy, face).normalize(), sz = new THREE.Vector3().crossVectors(sx, sy);
+        this.pick.matrix.makeBasis(sx, sy, sz).setPosition(c.addScaledVector(face, -H * (V.bagBack + 0.08)).addScaledVector(up, -H * 0.3).addScaledVector(right, H * 0.1));
+      }
       this.pick.matrixWorldNeedsUpdate = true;
     }
     if (this.bones.chest) {   // the bag hangs from his shoulders, against his back, leaning with him
@@ -961,6 +980,7 @@ class Game {
     this.set('bagW', (+w.toFixed(1)) + '/' + S.bagCapacity);
     this.set('bagSats', String(this.bagSats()));
     this.set('bag', (mineralText(this.bagMinerals()) || 'no minerals') + (w >= S.bagCapacity ? ' · full' : ''));
+    { const rv = records.get(); this.set('vaultSats', String(rv.totalPoints)); this.set('vault', mineralText(rv.minerals || {}) || 'no minerals'); }   // banked so far
     const r = records.get(), firstShift = r.shifts < S.keysHintShifts || (r.shifts === S.keysHintShifts && this.inShift);
     $('keys').style.display = firstShift ? '' : 'none';
     const mean = TEST ? S.testBlockSeconds : S.averageBlockSeconds, secs = this.climbOutSeconds();
