@@ -956,7 +956,7 @@ class Game {
     this.mine = MineGen.generate(b.hash, S, RULES, 1);
     MineGen.layoutTerrain(this.mine); MineGen.layoutNodes(this.mine, this.eco.budget());
     this.mine.spawnRng = seededRandom(b.hash + '|spawn'); this.mine.spawnT = 0;
-    this.lampLit = false; this.oilLeft = 0;   // a new shift: a new lamp to light
+    this.lampLit = false;   // a new block: a new lamp to light (oil not yet burnt keeps; the knock takes it only from those caught below)
     this.hatch = 'open';
     this.buildMine();
     this.mine.nodes.forEach((n) => this.showNode(n));
@@ -1137,16 +1137,17 @@ class Game {
     }
     const m = this.mine, best = tg.k;
     if (m.ladders[best].top === -1 && this.lvl === -1 && this.hatch !== 'open') { this.say('The hatch is shut.', 2); return; }
-    if (this.net && m.ladders[best].top === -1 && this.lvl === -1 && !this.lampLit) {   // online: the server lights the lamp and lets him in
-      if (this.purse.lamps < 1) { this.say(this.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.', 3); this.openShop(); return; }
+    if (this.net && m.ladders[best].top === -1 && this.lvl === -1 && !this.inShift) {   // online: the server lets him in (and lights a lamp if none burns this block)
+      if (!this.lampLit && this.purse.lamps < 1) { this.say(this.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.', 3); this.openShop(); return; }
       this.net.send({ t: 'enter' }); return;
     }
-    if (m.ladders[best].top === -1 && this.lvl === -1 && !this.lampLit) {   // one lamp is one shift: light one to go down
+    if (m.ladders[best].top === -1 && this.lvl === -1 && this.lampLit && !this.inShift && !this.net) this.say('Your lamp still burns: it lasts until the next block', 2.5);
+    if (m.ladders[best].top === -1 && this.lvl === -1 && !this.lampLit) {   // one lamp lasts the block: light one to go down
       this.freshMoney();
       if (this.purse.lamps < 1) { this.say(this.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.', 3); this.openShop(); return; }
       this.purse.lamps -= 1; this.lampLit = true; this.saveMoney();
       this.shiftCost = RULES.lampPrice + this.oilLeft * RULES.oilPrice; this.pastEven = false;   // what this shift must bring back to break even
-      this.say('Lamp lit for this shift' + (this.oilLeft ? ' · ' + this.oilLeft + ' measure' + (this.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
+      this.say('Lamp lit until the next block' + (this.oilLeft ? ' · ' + this.oilLeft + ' measure' + (this.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
     }
     this.mode = 'ladder'; this.ladderK = best; this.mx = m.G.colX(m.ladders[best].c); this.mining = null;
   }
@@ -1312,12 +1313,12 @@ class Game {
       if (k < 0) { this.goal = null; this.markGoal(); return null; }
       tx = G.colX(m.ladders[k].c);
       if (Math.abs(tx - this.mx) <= S.grabRange * T * 0.8) {
-        if (down && this.lvl === -1 && !this.lampLit) {   // the hatch: light a lamp first (online, the server lets him in)
+        if (down && this.lvl === -1 && (this.net ? !this.inShift : !this.lampLit)) {   // the hatch: light a lamp first (online, the server lets him in)
           if (performance.now() < (this.enterAt || 0)) return null;
           this.enterAt = performance.now() + 2000;
           this.action();
           if (this.mode !== 'ladder' && !this.net) { this.goal = null; this.markGoal(); }
-          if (this.hatch !== 'open' || this.purse.lamps < 1) { this.goal = null; this.markGoal(); }
+          if (this.hatch !== 'open' || (!this.lampLit && this.purse.lamps < 1)) { this.goal = null; this.markGoal(); }
           return null;
         }
         this.mode = 'ladder'; this.ladderK = k; this.mx = tx; return null;
@@ -1406,7 +1407,8 @@ class Game {
       if (kept) this.coinsToNet(Math.min(24, 4 + Math.round(Math.log2(1 + kept) * 2)));
     }
     this.bag = []; this.inShift = false;
-    this.lampLit = false; this.oilLeft = 0; this.shiftCost = 0;   // the shift is over: the next trip down lights a new lamp
+    this.shiftCost = Math.max(0, (this.shiftCost || 0) - kept);   // the lamp burns on until the next block: what is still to win back
+    // (lampLit and the oil left stay: one lamp lasts the whole block, however many trips he makes)
     const m = mineralText(mins);
     if (kept || m) {
       this.say((vaultPiece ? 'The Vault piece is yours! ' : '') + 'Kept ' + [kept ? fmt(kept) + ' sats' : '', m].filter(Boolean).join(' · ') + (kept ? ' (the Order takes a tenth)' : ''), 4);
@@ -1719,11 +1721,11 @@ class Game {
     $('buyKit').onclick = () => { if (this.net) return this.net.send({ t: 'buy', item: 'kit' }); this.freshMoney(); if (this.purse.buyKit(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
     $('buyLamp').onclick = () => { if (this.net) return this.net.send({ t: 'buy', item: 'lamp' }); this.freshMoney(); if (this.purse.buyLamp(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
     $('buyOil').onclick = () => {
-      if (this.below() || this.lampLit) { this.say('Oil is bought before you go down.', 2); return; }
+      if (this.below()) { this.say('Oil is bought on the surface.', 2); return; }
       if (this.oilLeft >= RULES.oilMaxMeasures) return;
       if (this.net) return this.net.send({ t: 'buy', item: 'oil' });
       this.freshMoney();
-      if (this.purse.buyOil(this.eco, 1)) { this.oilLeft += 1; Sound.tick(); this.saveMoney(); }
+      if (this.purse.buyOil(this.eco, 1)) { this.oilLeft += 1; if (this.lampLit) this.shiftCost = (this.shiftCost || 0) + RULES.oilPrice; Sound.tick(); this.saveMoney(); }
       this.openShop();
     };
     $('catch').textContent = 'Blocks come at random, every ten minutes on average. The chance one lands within ' +
@@ -1745,7 +1747,7 @@ class Game {
     $('ovBtn').onclick = () => { $('overlay').style.display = 'none'; this.overlay = false; };
   }
   openShop() {
-    const p = this.purse, R = RULES, onTop = !this.below() && !this.lampLit;
+    const p = this.purse, R = RULES, onTop = !this.below();
     $('shopPoints').textContent = fmt(p.points); $('shopLamps').textContent = p.lamps; $('shopOil').textContent = this.oilLeft;
     $('buyKit').style.display = p.hasKit ? 'none' : ''; $('buyKit').disabled = !p.canBuyKit();
     $('buyLamp').style.display = p.hasKit ? '' : 'none'; $('buyLamp').disabled = p.points < R.lampPrice;
@@ -1763,7 +1765,7 @@ class Game {
   }
   hud() {
     this.set('oil', this.oilLeft > 0 ? this.oilLeft.toFixed(1) : this.lampLit ? 'basic' : '–');
-    this.set('lamps', this.lampLit ? 'lamp lit · ' + this.purse.lamps + ' spare' : this.purse.lamps + ' lamp' + (this.purse.lamps === 1 ? '' : 's'));
+    this.set('lamps', this.lampLit ? 'lamp lit to next block · ' + this.purse.lamps + ' spare' : this.purse.lamps + ' lamp' + (this.purse.lamps === 1 ? '' : 's'));
     const w = this.bagWeight();
     this.set('bagW', w + '/' + RULES.bagCapacity);
     {   // the bag: sats carried, and in a shift the mark it must pass to break even (you keep 90% past the hatch)
@@ -1846,11 +1848,12 @@ class Net {
         Sound.knock(); g.shake = 0.45; g.hatch = 'shut'; g.mining = null; break;
       case 'state': this.state(m); break;
       case 'entered':
-        g.purse = Purse(RULES, m.purse); g.lampLit = true; g.oilLeft = m.oil; g.inShift = true; g.bag = [];
-        g.shiftCost = RULES.lampPrice + (m.oil || 0) * RULES.oilPrice; g.pastEven = false;
+        g.purse = Purse(RULES, m.purse); g.oilLeft = m.oil; g.inShift = true; g.bag = [];
+        if (!m.relit || !g.lampLit) g.shiftCost = RULES.lampPrice + (m.oil || 0) * RULES.oilPrice;   // a new lamp; a lamp already burning costs nothing more
+        g.lampLit = true; g.pastEven = false;
         records.get().shifts++; records.save();
         g.mode = 'ladder'; g.ladderK = 0; g.mx = g.mine.G.colX(g.mine.ladders[0].c); g.my = 0; g.mining = null;
-        g.say('Lamp lit for this shift' + (g.oilLeft ? ' · ' + g.oilLeft + ' measure' + (g.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
+        g.say((m.relit ? 'Your lamp still burns: it lasts until the next block' : 'Lamp lit until the next block') + (g.oilLeft ? ' · ' + g.oilLeft + ' measure' + (g.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
         break;
       case 'got': {
         const n = g.nodes.find((q) => q.id === m.id);
@@ -1866,10 +1869,11 @@ class Net {
       case 'bag': g.bag = m.bag.map((it) => this.item(it)); break;
       case 'snap': this.snap(m.place); break;
       case 'banked': {
-        g.purse = Purse(RULES, m.purse); g.inShift = false; g.lampLit = false; g.oilLeft = 0;
+        g.purse = Purse(RULES, m.purse); g.inShift = false; g.oilLeft = m.oil || 0;   // the lamp burns on until the next block
         g.addBlockKept(m.kept);
         const r = records.get(); r.totalPoints += m.kept; r.survived = (r.survived || 0) + 1; if (m.piece) r.vaultPieces = (r.vaultPieces || 0) + 1;
         r.best = Math.max(r.best || 0, m.kept - (g.shiftCost || 0)); records.save();
+        g.shiftCost = Math.max(0, (g.shiftCost || 0) - m.kept);
         if (m.kept) g.coinsToNet(Math.min(24, 4 + Math.round(Math.log2(1 + m.kept) * 2)));
         const mins = {}; for (const it of m.bag) if (it.kind !== 'amber' && it.kind !== 'vault') mins[it.kind] = (mins[it.kind] || 0) + 1;
         g.bag = [];
