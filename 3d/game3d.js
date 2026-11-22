@@ -198,7 +198,7 @@ class Game {
     this.hatch = 'waiting'; this.paused = false; this.overlay = false;
     this.shutTimer = null; this.msgUntil = 0; this.clock = 0; this.blockInfo = null; this.risk = 0; this.shake = 0; this.last = {};
 
-    this.buildMiner(); this.buildFx();
+    this.buildMiner(); this.buildFx(); this.buildCoins();
     const c = this.renderer.domElement;
     c.addEventListener('pointerdown', (e) => this.down(e)); window.addEventListener('pointermove', (e) => this.move(e));
     window.addEventListener('pointerup', (e) => this.up(e)); window.addEventListener('pointercancel', (e) => this.up(e));
@@ -471,6 +471,82 @@ class Game {
     for (let i = 0; i < n; i++) this.sparks.p.push({ x: 0, y: 0, z: 0, vx: 0, vy: 0, life: 0, max: 1, c: new THREE.Color() });
     this.sparks.pts.frustumCulled = false; this.scene.add(this.sparks.pts);
   }
+  // gold coins: they burst out of a broken amber pile, bounce, then sweep into his bag (carried, not kept)
+  buildCoins() {
+    const N = this.coinMax = 160;
+    const geo = new THREE.CylinderGeometry(4.6, 4.6, 0.9, 16); geo.rotateX(Math.PI / 2);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffc33a, metalness: 0.95, roughness: 0.28, emissive: 0x8a5000, emissiveIntensity: 0.7 });
+    this.coinMesh = new THREE.InstancedMesh(geo, mat, N); this.coinMesh.frustumCulled = false; this.coinMesh.count = 0;
+    this.scene.add(this.coinMesh);
+    this.coinList = []; this.coinDummy = new THREE.Object3D(); this.clinkT = 0;
+  }
+  // n coins from a point (world units, y down); fly: true = they go into the bag after bouncing
+  coins(n, x, y, z, fly, big) {
+    if (!this.coinMesh) return;
+    const fy = this.mine ? this.floorY(this.lvl) : y + 20;
+    for (let i = 0; i < n && this.coinList.length < this.coinMax; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, s = (big ? 150 : 95) + Math.random() * 90;
+      this.coinList.push({ x, y, z: z + (Math.random() - 0.5) * 8, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: (Math.random() - 0.5) * 30, floor: fy - 1.2,
+        rx: Math.random() * 6, ry: Math.random() * 6, sx: (Math.random() - 0.5) * 22, sy: (Math.random() - 0.5) * 22, t: 0, fly, flyAt: 0.55 + i * 0.025, bounces: 0 });
+    }
+    this.clink(Math.min(6, 1 + Math.floor(n / 5)), big);
+  }
+  coinsStep(dt) {
+    if (!this.coinMesh) return;
+    const H = S.minerHeight, bx = this.mx - this.facing * 7, by = this.my - H * 0.62, d = this.coinDummy;
+    let k = 0, landed = 0;
+    this.coinList = this.coinList.filter((c) => {
+      c.t += dt;
+      if (c.fly && c.t >= c.flyAt) {   // into the bag: an arc that tightens as it nears
+        const f = Math.min(1, (c.t - c.flyAt) / 0.32);
+        if (!c.from) c.from = { x: c.x, y: c.y, z: c.z };
+        c.x = c.from.x + (bx - c.from.x) * f; c.y = c.from.y + (by - c.from.y) * f - Math.sin(f * Math.PI) * 26; c.z = c.from.z * (1 - f) + 6 * f;
+        if (f >= 1) { landed++; return false; }
+      } else {
+        c.vy += S.gravity * 2.2 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.z += c.vz * dt;
+        if (c.y > c.floor && c.vy > 0) { c.y = c.floor; c.vy *= -0.38; c.vx *= 0.6; c.sx *= 0.6; c.bounces++; if (c.bounces === 1 && Math.random() < 0.3) this.clink(1); }
+        if (!c.fly && c.t > 1.6) return false;
+      }
+      c.rx += c.sx * dt; c.ry += c.sy * dt;
+      d.position.set(c.x, -c.y, c.z); d.rotation.set(c.rx, c.ry, 0);
+      const fade = !c.fly && c.t > 1.2 ? 1 - (c.t - 1.2) / 0.4 : 1; d.scale.setScalar(Math.max(0.05, fade));
+      d.updateMatrix(); this.coinMesh.setMatrixAt(k++, d.matrix);
+      return true;
+    });
+    this.coinMesh.count = k; this.coinMesh.instanceMatrix.needsUpdate = true;
+    if (landed) { this.bagPop = 0.18; if (Math.random() < 0.5) this.clink(1); }
+  }
+  // a coin's clink: two bright partials that ring and die, a little different each time
+  clink(n, big) {
+    if (Sound.muted() || !Sound.unlock) return;
+    const ctx = Sound.unlock(); if (!ctx || ctx.state !== 'running') return;
+    const now = ctx.currentTime;
+    for (let i = 0; i < n; i++) {
+      const t = now + i * (0.035 + Math.random() * 0.05), f = (big ? 2300 : 2900) + Math.random() * 900;
+      for (const [m, g] of [[1, 0.06], [2.76, 0.035]]) {
+        const o = ctx.createOscillator(), a = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = f * m;
+        a.gain.setValueAtTime(0, t); a.gain.linearRampToValueAtTime(g, t + 0.003); a.gain.exponentialRampToValueAtTime(0.0001, t + 0.18 + Math.random() * 0.12);
+        o.connect(a).connect(ctx.destination); o.start(t); o.stop(t + 0.35);
+      }
+    }
+  }
+  // at the hatch: coins pour out of the bag up into the Net counter (drawn on the page, over the game)
+  coinsToNet(n) {
+    const cell = $('vaultCell'); if (!cell || !n) return;
+    const from = this.screen(this.mx, this.my - S.minerHeight * 0.6, 0), r = cell.getBoundingClientRect(), tx = r.left + r.width / 2, ty = r.top + r.height / 2;
+    for (let i = 0; i < n; i++) {
+      const c = document.createElement('div'); c.className = 'coinFly';
+      c.style.left = from.x + 'px'; c.style.top = from.y + 'px'; document.body.appendChild(c);
+      const delay = i * 45, jx = (Math.random() - 0.5) * 60;
+      setTimeout(() => {
+        c.animate([{ transform: 'translate(-50%,-50%) scale(1)', offset: 0 },
+          { transform: `translate(calc(-50% + ${jx}px), calc(-50% - 60px)) scale(1.15)`, offset: 0.3 },
+          { transform: `translate(calc(-50% + ${tx - from.x}px), calc(-50% + ${ty - from.y}px)) scale(0.6)`, offset: 1 }],
+          { duration: 700, easing: 'cubic-bezier(.3,.1,.3,1)', fill: 'forwards' }).onfinish = () => { c.remove(); if (i % 3 === 0) this.clink(1); };
+      }, delay);
+    }
+  }
   burst(count, x, y, z, tint) {
     const S2 = this.sparks, cols = [0xffe0a0, 0xffa030, 0xffffff];
     for (let i = 0; i < count; i++) {
@@ -700,6 +776,7 @@ class Game {
       this.freshMoney();
       if (this.purse.lamps < 1) { this.say(this.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.', 3); this.openShop(); return; }
       this.purse.lamps -= 1; this.lampLit = true; this.saveMoney();
+      this.shiftCost = RULES.lampPrice + this.oilLeft * RULES.oilPrice; this.pastEven = false;   // what this shift must bring back to break even
       this.say('Lamp lit for this shift' + (this.oilLeft ? ' · ' + this.oilLeft + ' measure' + (this.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
     }
     this.mode = 'ladder'; this.ladderK = best; this.mx = m.G.colX(m.ladders[best].c); this.mining = null;
@@ -882,6 +959,7 @@ class Game {
     if (this.terrainAt(this.lvl, ahead, 'gap') || this.terrainAt(this.lvl, ahead, 'rubble')) return { dir, jump: true };
     return { dir };
   }
+  coinCount(n) { return n.kind === 'vault' || n.rich ? 40 : Math.max(5, Math.min(30, Math.round(2 + Math.log2(1 + (n.value || 0)) * 2.2))); }
   startMining(n) {
     if (this.bagWeight() + n.weight > RULES.bagCapacity + 1e-9) { this.say('Your bag is full. Drop ore or go up.', 2.5); return; }
     this.mx = n.standX; this.mining = n; this.facing = n.x < this.mx ? -1 : 1;
@@ -895,11 +973,12 @@ class Game {
     const swingsNeeded = (S.sloppySwings - t * (S.sloppySwings - S.cleanSwings)) * (n.hardness || 1);   // deeper rock is harder
     if (this.net) {   // online: the server counts the strokes and breaks the node
       this.net.send({ t: 'stroke', id: n.id }); n.flash = 0.12; this.swingT = V.swingSeconds; this.swingStart = true; Sound.tick();
-      this.burst(t >= 1 ? 16 : 7, n.x, n.y, n.z); return;
+      this.burst(t >= 1 ? 16 : 7, n.x, n.y, n.z); if (n.kind === 'amber') this.coins(t >= 1 ? 2 : 1, n.x, n.y - n.r * 0.3, n.z, false); return;
     }
     n.hp -= 1 / swingsNeeded; n.flash = 0.12; this.swingT = V.swingSeconds; this.swingStart = true;
     Sound.tick();
     this.burst(t >= 1 ? 16 : 7, n.x, n.y, n.z);
+    if (n.kind === 'amber' && n.hp > 1e-9) this.coins(t >= 1 ? 2 : 1, n.x, n.y - n.r * 0.3, n.z, false);
     this.float(n.x, n.y - n.r - 10, n.z, t >= 1 ? 'clean' : t > 0.5 ? 'rough' : 'sloppy');
     if (n.hp <= 1e-9) {
       this.burst(24, n.x, n.y, n.z);
@@ -907,6 +986,7 @@ class Game {
       if (this.bagWeight() + n.weight > RULES.bagCapacity + 1e-9) { this.say('No room in the bag. The ore fell.', 2.5); if (n.kind === 'vault') this.returnVault(); }
       else {
         this.bag.push({ kind: n.kind, sats: n.value, weight: n.weight, l: n.l, dropped: !!n.dropped });
+        if (n.kind === 'amber' || n.kind === 'vault') this.coins(this.coinCount(n), n.x, n.y - n.r * 0.3, n.z, true, n.rich || n.kind === 'vault');
         if (n.kind === 'amber') { this.float(n.x, n.y - n.r - 4, n.z, '+' + fmt(n.value) + ' sats'); this.say((n.rich ? 'A rich node! ' : '') + '+' + fmt(n.value) + ' sats carried. Kept only past the hatch.', 2.5); }
         else if (n.kind === 'vault') this.say('The Vault piece! Worth a tenth of the Vault (now ' + fmt(this.eco.vaultPieceValue()) + ') if you carry it out. Weight 10.', 5);
         else this.say('+1 ' + n.kind + ' in the bag (weight ' + n.weight + ')', 2);
@@ -931,7 +1011,7 @@ class Game {
     const hadVault = this.bag.some((p) => p.kind === 'vault');
     this.bag = []; this.inShift = false; this.lampLit = false; this.oilLeft = 0; this.drag = null;
     this.toSurface();
-    records.get().timesCaught++; records.save();
+    { const r = records.get(); r.timesCaught++; r.lost = (r.lost || 0) + amber; records.save(); }
     this.showOverlay('The deep is closed', 'The knock came before you reached the hatch. Your lamp and your bag (' + fmt(amber) + ' sats carried) are lost' + (hadVault ? ', and the Vault piece went back to the Vault' : '') + '.');
   }
   bank() {   // past the hatch, the bag is his: the miner keeps 90% of the amber, the studio 10%
@@ -945,7 +1025,9 @@ class Game {
       for (const k in mins) r.minerals[k] = (r.minerals[k] || 0) + mins[k];
       if (vaultPiece) r.vaultPieces = (r.vaultPieces || 0) + 1;
       r.survived = (r.survived || 0) + 1;
+      r.best = Math.max(r.best || 0, kept - (this.shiftCost || 0));
       records.save(); this.saveMoney();
+      if (kept) this.coinsToNet(Math.min(24, 4 + Math.round(Math.log2(1 + kept) * 2)));
     }
     this.bag = []; this.inShift = false;
     const m = mineralText(mins);
@@ -994,6 +1076,7 @@ class Game {
     }
     for (const n of this.nodes) n.flash = Math.max(0, (n.flash || 0) - dt);
     if (this.mine) this.draw(real, dt);
+    if (this.mine) this.coinsStep(real);
     if (this.mine) Music.update(real, this.mode === 'ladder' ? this.mine.ladders[this.ladderK].top : this.falling ? this.falling.toLvl : this.lvl);
     if (this.net && this.mine) this.net.frame(real);
     if (this.levelLabels && this.lvl >= 0 && this.levelLabels[this.lvl]) this.levelLabels[this.lvl].visible = true;
@@ -1268,6 +1351,9 @@ class Game {
       RULES.catchRates.map(([s, p]) => (s < 60 ? s + ' s' : s / 60 + ' min') + ': ' + p).join(' · ') + '.';
     $('recBtn').onclick = () => {
       const r = records.get();
+      { const net = this.purse.points - RULES.startPoints, kept = r.totalPoints || 0, sign = (v) => (v > 0 ? '+' : v < 0 ? '\u2212' : '') + fmt(Math.abs(v));
+        $('rSpent').textContent = fmt(kept - net); $('rKept').textContent = fmt(kept); $('rLost').textContent = fmt(r.lost || 0);
+        $('rNet').textContent = sign(net); $('rBest').textContent = r.best ? sign(r.best) : '\u2014'; $('rLamps').textContent = this.purse.lamps; }
       $('rShifts').textContent = r.shifts; $('rDeep').textContent = r.deepestLevel;
       $('rCaught').textContent = r.timesCaught; $('rPoints').textContent = r.totalPoints; $('rVault').textContent = r.vaultPieces || 0;
       $('rMinerals').textContent = mineralText(r.minerals || {}) || 'none';
@@ -1301,9 +1387,21 @@ class Game {
     this.set('lamps', this.lampLit ? 'lamp lit · ' + this.purse.lamps + ' spare' : this.purse.lamps + ' lamp' + (this.purse.lamps === 1 ? '' : 's'));
     const w = this.bagWeight();
     this.set('bagW', w + '/' + RULES.bagCapacity);
-    this.set('bagSats', fmt(this.bagSats()));
+    {   // the bag: sats carried, and in a shift the mark it must pass to break even (you keep 90% past the hatch)
+      const sats = this.bagSats(), even = this.lampLit && this.shiftCost ? Math.ceil(this.shiftCost / RULES.carriedOutTo.miner) : 0;
+      this.set('bagSats', even ? fmt(sats) + ' / ' + fmt(even) : fmt(sats));
+      const past = !!even && sats >= even;
+      if (past !== this.last.pastEvenCls) { this.last.pastEvenCls = past; $('bagSats').classList.toggle('past', past); }
+      if (past && !this.pastEven) { this.pastEven = true; this.say('Past break-even: carry it out and the rest is profit.', 2.5); const b = $('bagSats').closest('.cell'); b.classList.remove('flash'); void b.offsetWidth; b.classList.add('flash'); }
+      if (!this.lampLit) this.pastEven = false;
+    }
     this.set('bag', 'carried, not kept' + (this.bag.some((p) => p.kind === 'vault') ? ' · the Vault piece' : '') + (mineralText(this.bagMinerals()) ? ' · ' + mineralText(this.bagMinerals()) : '') + (w >= RULES.bagCapacity ? ' · full' : ''));
-    { const rv = records.get(); this.set('vaultSats', String(rv.totalPoints)); this.set('vault', mineralText(rv.minerals || {}) || 'no minerals'); }   // banked so far
+    {   // net: everything kept minus everything spent on the kit, lamps and oil (points start at the same amount for everyone)
+      const rv = records.get(), net = this.purse.points - RULES.startPoints, kept = rv.totalPoints || 0;
+      this.set('vaultSats', (net > 0 ? '+' : net < 0 ? '\u2212' : '') + fmt(Math.abs(net)));
+      if (Math.sign(net) !== this.last.netSign) { this.last.netSign = Math.sign(net); $('vaultSats').classList.toggle('neg', net < 0); $('vaultSats').classList.toggle('pos', net > 0); }
+      this.set('vault', 'kept ' + fmt(kept) + ' \u00b7 spent ' + fmt(kept - net));
+    }
     const r = records.get(), firstShift = r.shifts < S.keysHintShifts || (r.shifts === S.keysHintShifts && this.inShift);
     $('keys').style.display = firstShift ? '' : 'none';
     const mean = TEST ? S.testBlockSeconds : S.averageBlockSeconds, secs = this.climbOutSeconds();
@@ -1366,13 +1464,14 @@ class Net {
       case 'state': this.state(m); break;
       case 'entered':
         g.purse = Purse(RULES, m.purse); g.lampLit = true; g.oilLeft = m.oil; g.inShift = true; g.bag = [];
+        g.shiftCost = RULES.lampPrice + (m.oil || 0) * RULES.oilPrice; g.pastEven = false;
         records.get().shifts++; records.save();
         g.mode = 'ladder'; g.ladderK = 0; g.mx = g.mine.G.colX(g.mine.ladders[0].c); g.my = 0; g.mining = null;
         g.say('Lamp lit for this shift' + (g.oilLeft ? ' · ' + g.oilLeft + ' measure' + (g.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
         break;
       case 'got': {
         const n = g.nodes.find((q) => q.id === m.id);
-        if (n) { g.burst(24, n.x, n.y, n.z); g.removeNode(n); }
+        if (n) { g.burst(24, n.x, n.y, n.z); if (n.kind === 'amber' || n.kind === 'vault') g.coins(g.coinCount(n), n.x, n.y - n.r * 0.3, n.z, true, n.rich || n.kind === 'vault'); g.removeNode(n); }
         if (g.mining && g.mining.id === m.id) g.mining = null;
         g.bag = m.bag.map((it) => this.item(it));
         const it = m.item;
@@ -1385,7 +1484,9 @@ class Net {
       case 'snap': this.snap(m.place); break;
       case 'banked': {
         g.purse = Purse(RULES, m.purse); g.inShift = false; g.lampLit = false; g.oilLeft = 0;
-        const r = records.get(); r.totalPoints += m.kept; r.survived = (r.survived || 0) + 1; if (m.piece) r.vaultPieces = (r.vaultPieces || 0) + 1; records.save();
+        const r = records.get(); r.totalPoints += m.kept; r.survived = (r.survived || 0) + 1; if (m.piece) r.vaultPieces = (r.vaultPieces || 0) + 1;
+        r.best = Math.max(r.best || 0, m.kept - (g.shiftCost || 0)); records.save();
+        if (m.kept) g.coinsToNet(Math.min(24, 4 + Math.round(Math.log2(1 + m.kept) * 2)));
         const mins = {}; for (const it of m.bag) if (it.kind !== 'amber' && it.kind !== 'vault') mins[it.kind] = (mins[it.kind] || 0) + 1;
         g.bag = [];
         if (m.kept || Object.keys(mins).length) {
@@ -1396,7 +1497,7 @@ class Net {
       }
       case 'caught':
         g.purse = Purse(RULES, m.purse); g.bag = []; g.inShift = false; g.lampLit = false; g.oilLeft = 0; g.drag = null; g.toSurface();
-        records.get().timesCaught++; records.save();
+        { const r = records.get(); r.timesCaught++; r.lost = (r.lost || 0) + (m.sats || 0); records.save(); }
         g.showOverlay('The deep is closed', 'The knock came before you reached the hatch. Your lamp and your bag (' + fmt(m.sats) + ' sats carried) are lost.');
         break;
       case 'purse':
