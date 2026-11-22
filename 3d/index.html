@@ -83,7 +83,11 @@
   #records td { padding: 5px 0; } #records td:last-child { text-align: right; color: #ffb547; }
   #records .btns { display: flex; gap: 8px; flex-wrap: wrap; }
   /* banked so far: lights up when a bag is banked at the hatch */
-  #vaultSats { color: #ffb547; }
+  #vaultSats { color: #ffb547; } #vaultSats.neg { color: #e0705a; } #vaultSats.pos { color: #8fd17a; }
+  #bagSats.past { color: #ffd76a; text-shadow: 0 0 8px rgba(255,200,80,.8), 0 1px 2px #000; }
+  .cell.flash .bar { animation: banked 1.6s ease-out; }
+  .coinFly { position: fixed; width: 14px; height: 14px; border-radius: 50%; pointer-events: none; z-index: 8;
+    background: radial-gradient(circle at 35% 30%, #fff6c8 0, #ffd04a 35%, #c98a12 75%, #7a4a00 100%); box-shadow: 0 0 6px rgba(255,190,60,.9); }
   #vaultCell.flash .bar { animation: banked 1.6s ease-out; }
   @keyframes banked { 0% { box-shadow: 0 0 0 2px #ffb547, 0 0 28px 6px rgba(255,181,71,.8); } 100% { box-shadow: inset 0 0 0 3px rgba(0,0,0,.75), inset 0 0 0 4px rgba(176,141,87,.45), 0 2px 8px rgba(0,0,0,.6); } }
   @media (max-width: 640px), (max-height: 500px) { #vaultCell small { display: none; } #left { flex-wrap: wrap; row-gap: 4px; min-width: 0; } }
@@ -97,6 +101,10 @@
     .cell small, #riskCell small, #prevOpen { display: none; }
     #left { flex-wrap: nowrap; gap: 4px; }
     #riskCell { align-self: start; margin-right: 46px; }   /* clear of the sound and music buttons */
+    #clockCell { grid-column: 1; grid-row: 1; order: 0; }
+    #riskCell { grid-column: 2; grid-row: 1; }
+    #left { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; row-gap: 4px; margin-right: 46px; }
+    #left .bar > span:last-child:not(:first-child) { display: none; }   /* "sats": the numbers say it */
     #test { margin-right: 46px; }
     #clockCell { padding: 0 44px 0 0; justify-self: start; }
     #keys { font-size: 12px; padding: 4px 8px; margin-bottom: 6px; }
@@ -120,7 +128,7 @@
       <div id="left">
         <div class="cell"><div class="bar"><span>Oil</span><b id="oil">–</b></div><small id="lamps">no lamps</small></div>
         <div class="cell"><div class="bar"><span>Bag</span><b id="bagW">0/10</b><b id="bagSats">0</b><span>sats</span></div><small id="bag">no minerals</small></div>
-        <div class="cell" id="vaultCell"><div class="bar"><span>Banked</span><b id="vaultSats">0</b><span>sats</span></div><small id="vault">no minerals</small></div>
+        <div class="cell" id="vaultCell"><div class="bar"><span>Net</span><b id="vaultSats">0</b><span>sats</span></div><small id="vault">kept 0 · spent 0</small></div>
       </div>
       <div class="cell" id="clockCell">
         <div class="bar"><span>Block</span><b id="blockNum">–</b><span>Open</span><b id="blockOpen">0:00</b></div>
@@ -169,7 +177,13 @@
     <tr><td>Shifts</td><td id="rShifts">0</td></tr>
     <tr><td>Deepest level</td><td id="rDeep">0</td></tr>
     <tr><td>Times caught</td><td id="rCaught">0</td></tr>
-    <tr><td>Sats banked</td><td id="rPoints">0</td></tr>
+    <tr><td>Spent on the kit, lamps and oil</td><td id="rSpent">0</td></tr>
+    <tr><td>Kept, carried past the hatch</td><td id="rKept">0</td></tr>
+    <tr><td>Net</td><td id="rNet">0</td></tr>
+    <tr><td>Best shift (kept minus its lamp and oil)</td><td id="rBest">—</td></tr>
+    <tr><td>Lost to the knock (sats in the bag)</td><td id="rLost">0</td></tr>
+    <tr><td>Lamps in hand</td><td id="rLamps">0</td></tr>
+    <tr style="display:none"><td>Sats banked</td><td id="rPoints">0</td></tr>
     <tr><td>Vault pieces won</td><td id="rVault">0</td></tr>
     <tr><td>Minerals banked</td><td id="rMinerals">none</td></tr>
   </table>
@@ -185,6 +199,6 @@
 <script src="rules3d.js?v=4"></script>
 <script src="mine3d.js?v=3"></script>
 <script src="economy3d.js?v=2"></script>
-<script type="module" src="game3d.js?v=34"></script>
+<script type="module" src="game3d.js?v=36"></script>
 </body>
 </html>
