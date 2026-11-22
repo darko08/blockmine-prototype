@@ -7,7 +7,8 @@ from mathutils import Vector
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', '..', '3d', 'models')
 TARGET = {'ore': 2500, 'ore_rich': 3000, 'ladder': 2500, 'headframe': 8000, 'cart': 3000, 'barrel': 2000,
-          'crate': 1500, 'iron': 2500, 'silver': 2500, 'lantern': 2500, 'pickaxe': 1500, 'timber': 1200}
+          'crate': 1500, 'iron': 2500, 'silver': 2500, 'lantern': 2500, 'timber': 1200,
+          'dep_bitcoin': 3500, 'dep_iron': 3000, 'dep_silver': 3500, 'dep_amber': 3000, 'bag_empty': 2500, 'bag_half': 2500, 'bag_full': 3000}
 names = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 names = names or [n for n in TARGET if os.path.exists(os.path.join(HERE, n + '.glb'))]
 os.makedirs(OUT, exist_ok=True)
