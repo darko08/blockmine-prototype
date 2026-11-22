@@ -8,6 +8,9 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 const S = window.SETTINGS, RULES = window.RULES, MineGen = window.MineGen3, { Economy, Purse } = window.Economy3;
 const TEST = new URLSearchParams(location.search).has('test');
+// online: the shared shaft on the server (?online on the server's own address, or ?server=wss://host/ws)
+const QS = new URLSearchParams(location.search);
+const ONLINE = QS.get('server') || (QS.has('online') ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws' : null);
 const T = S.tile, $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const mmss = (ms) => {
@@ -161,7 +164,7 @@ class Game {
     this.bindHud();
     this.prev = performance.now();
     this.renderer.setAnimationLoop((t) => this.frame(t));
-    startChain(TEST, (b) => this.onBlock(b), (s) => this.onStatus(s));
+    if (ONLINE) this.net = new Net(this, ONLINE); else startChain(TEST, (b) => this.onBlock(b), (s) => this.onStatus(s));
     $('loading').style.display = 'none';
   }
 
@@ -530,7 +533,7 @@ class Game {
     this.mine.nodes = this.mine.nodes.filter((x) => x !== n);
   }
   spawn(dt) {   // shallow ore regrows slowly during the shift, drawing on the block's budget
-    const m = this.mine; if (this.hatch !== 'open' || !m) return;
+    const m = this.mine; if (this.hatch !== 'open' || !m || this.net) return;   // online the server regrows the ore
     m.spawnT += dt;
     while (m.spawnT >= RULES.regrowEverySeconds) {
       m.spawnT -= RULES.regrowEverySeconds;
@@ -637,11 +640,16 @@ class Game {
       if (this.bagWeight() + near.weight > RULES.bagCapacity + 1e-9) { this.say('Your bag is full. Drop ore or go up.', 2.5); return; }
       if (Math.abs(near.x - this.mx) < S.oreStandGap * T * 0.8) this.mx = near.standX;
       this.mining = near; this.facing = near.x < this.mx ? -1 : 1;
+      if (this.net) this.net.send({ t: 'pick', id: near.id });
       this.say('Drag along the crack to swing', 2);
       return;
     }
     const m = this.mine, best = tg.k;
     if (m.ladders[best].top === -1 && this.lvl === -1 && this.hatch !== 'open') { this.say('The hatch is shut.', 2); return; }
+    if (this.net && m.ladders[best].top === -1 && this.lvl === -1 && !this.lampLit) {   // online: the server lights the lamp and lets him in
+      if (this.purse.lamps < 1) { this.say(this.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.', 3); this.openShop(); return; }
+      this.net.send({ t: 'enter' }); return;
+    }
     if (m.ladders[best].top === -1 && this.lvl === -1 && !this.lampLit) {   // one lamp is one shift: light one to go down
       this.freshMoney();
       if (this.purse.lamps < 1) { this.say(this.purse.hasKit ? 'You need a lamp to go down. Buy one (300).' : 'Buy the starting kit (1,000) to go down.', 3); this.openShop(); return; }
@@ -747,6 +755,10 @@ class Game {
     const straight = disp / Math.max(disp, len);
     const t = clamp((align * straight - S.sloppyAt) / (S.cleanAt - S.sloppyAt), 0, 1);
     const swingsNeeded = (S.sloppySwings - t * (S.sloppySwings - S.cleanSwings)) * (n.hardness || 1);   // deeper rock is harder
+    if (this.net) {   // online: the server counts the strokes and breaks the node
+      this.net.send({ t: 'stroke', id: n.id }); n.flash = 0.12; this.swingT = V.swingSeconds; this.swingStart = true; Sound.tick();
+      this.burst(t >= 1 ? 16 : 7, n.x, n.y, n.z); return;
+    }
     n.hp -= 1 / swingsNeeded; n.flash = 0.12; this.swingT = V.swingSeconds; this.swingStart = true;
     Sound.tick();
     this.burst(t >= 1 ? 16 : 7, n.x, n.y, n.z);
@@ -809,6 +821,7 @@ class Game {
   // drop the last piece: it stays in the tunnel for anyone; dropped amber is worth half, the other half goes to the Vault.
   // The Vault piece is never left lying: dropped, it goes back to the Vault.
   drop() {
+    if (this.net) { if (this.bag.length) { const p = this.bag.pop(); Sound.tick(); this.net.send({ t: 'drop' }); this.say(p.kind === 'vault' ? 'The Vault piece went back to the Vault.' : 'Dropped ' + (p.kind === 'amber' ? fmt(p.sats) + ' sats (worth half to whoever picks it up)' : '1 ' + p.kind), 2.5); } return; }
     const p = this.bag.pop(); if (!p) return;
     this.freshMoney();
     Sound.tick();
@@ -825,9 +838,10 @@ class Game {
     v.hp = 1; m.nodes.push(v); this.showNode(v);
   }
   freshMoney() {   // another tab may have spent or earned since: always start from what is stored
+    if (this.net) return;   // online, the server holds the purse
     this.eco = Economy(RULES, loadJSON(ECO_KEY)); this.purse = Purse(RULES, loadJSON(PURSE_KEY));
   }
-  saveMoney() { saveJSON(ECO_KEY, this.eco.toJSON()); saveJSON(PURSE_KEY, this.purse.toJSON()); }
+  saveMoney() { if (this.net) return; saveJSON(ECO_KEY, this.eco.toJSON()); saveJSON(PURSE_KEY, this.purse.toJSON()); }
   bagWeight() { return this.bag.reduce((a, b) => a + b.weight, 0); }
   bagSats() { return this.bag.reduce((a, b) => a + b.sats, 0); }
   bagMinerals() { const c = {}; for (const b of this.bag) if (b.kind !== 'amber' && b.kind !== 'vault') c[b.kind] = (c[b.kind] || 0) + 1; return c; }
@@ -842,6 +856,7 @@ class Game {
     }
     for (const n of this.nodes) n.flash = Math.max(0, (n.flash || 0) - dt);
     if (this.mine) this.draw(real, dt);
+    if (this.net && this.mine) this.net.frame(real);
     if (this.levelLabels && this.lvl >= 0 && this.levelLabels[this.lvl]) this.levelLabels[this.lvl].visible = true;
     this.hud();
     this.renderer.render(this.scene, this.camera);
@@ -852,7 +867,7 @@ class Game {
     this.physics(dt);
     const below = this.below();
     if (below && !wasBelow && !this.inShift) { this.inShift = true; records.get().shifts++; records.save(); }
-    if (!below && wasBelow) this.bank();
+    if (!below && wasBelow && !this.net) this.bank();   // online the server banks the bag when he is past the hatch
     const h = this.here();
     if (this.mode === 'ground' && h.l >= 0 && h.l + 1 > records.get().deepestLevel) { records.get().deepestLevel = h.l + 1; records.save(); }
     if (below && this.oilLeft > 0) {
@@ -1100,11 +1115,12 @@ class Game {
     $('shopBtn').onclick = () => { this.freshMoney(); this.openShop(); };
     window.addEventListener('storage', (e) => { if (e.key === ECO_KEY || e.key === PURSE_KEY) this.freshMoney(); });
     $('shopClose').onclick = () => { $('shop').style.display = 'none'; this.overlay = false; };
-    $('buyKit').onclick = () => { this.freshMoney(); if (this.purse.buyKit(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
-    $('buyLamp').onclick = () => { this.freshMoney(); if (this.purse.buyLamp(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
+    $('buyKit').onclick = () => { if (this.net) return this.net.send({ t: 'buy', item: 'kit' }); this.freshMoney(); if (this.purse.buyKit(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
+    $('buyLamp').onclick = () => { if (this.net) return this.net.send({ t: 'buy', item: 'lamp' }); this.freshMoney(); if (this.purse.buyLamp(this.eco)) { Sound.tick(); this.saveMoney(); } this.openShop(); };
     $('buyOil').onclick = () => {
       if (this.below() || this.lampLit) { this.say('Oil is bought before you go down.', 2); return; }
       if (this.oilLeft >= RULES.oilMaxMeasures) return;
+      if (this.net) return this.net.send({ t: 'buy', item: 'oil' });
       this.freshMoney();
       if (this.purse.buyOil(this.eco, 1)) { this.oilLeft += 1; Sound.tick(); this.saveMoney(); }
       this.openShop();
@@ -1160,6 +1176,171 @@ class Game {
     this.set('blockNum', bi ? bi.height.toLocaleString() : '–');
     this.set('blockOpen', bi ? mmss((TEST ? TestClock.now() : Date.now()) - bi.arrivedAt) : '–:––');
     this.set('prevOpen', bi && bi.prevOpenMs != null ? 'previous block open ' + mmss(bi.prevOpenMs) : 'previous block open —');
+  }
+}
+
+// ---------- online: the shared shaft ----------
+// The page sends what the player does (where he is, his strokes, what he buys) and draws what the server sends back:
+// the shape of the mine, the ore his own lamp shows, faint glimmers further out, the miners near him in full and the
+// rest as points of light. The server decides every result.
+class Net {
+  constructor(game, url) {
+    this.g = game; this.url = url; this.sendT = 0; this.others = new Map(); this.lights = [];
+    this.connect();
+  }
+  connect() {
+    const ws = this.ws = new WebSocket(this.url);
+    ws.onopen = () => { let token = null; try { token = localStorage.getItem('blockmine3d.token'); } catch (e) {} this.send({ t: 'hello', token }); this.g.onStatus('live'); };
+    ws.onmessage = (ev) => { let m; try { m = JSON.parse(ev.data); } catch (e) { return; } this.on(m); };
+    ws.onclose = () => { this.g.onStatus('lost'); setTimeout(() => this.connect(), 3000); };
+  }
+  send(m) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(m)); }
+  place() {
+    const g = this.g;
+    if (g.mode === 'ladder') return { k: g.ladderK, y: g.my };
+    if (g.mode === 'ground') return { l: g.lvl, x: g.mx };
+    return null;   // falling or jumping: sent when he lands
+  }
+  frame(real) {
+    const g = this.g;
+    this.sendT += real;
+    if (g.lampLit && this.sendT >= 0.1 && !g.mining) { this.sendT = 0; const p = this.place(); if (p) this.send({ t: 'pos', p, f: g.facing }); }
+    for (const o of this.others.values()) o.mixer.update(real);
+  }
+  item(it) { return { kind: it.kind, sats: it.value || 0, weight: it.weight, dropped: !!it.dropped }; }
+  on(m) {
+    const g = this.g;
+    switch (m.t) {
+      case 'welcome':
+        try { localStorage.setItem('blockmine3d.token', m.token); } catch (e) {}
+        g.purse = Purse(RULES, m.purse); this.id = m.id; break;
+      case 'block':
+        g.blockInfo = { height: m.height, arrivedAt: m.arrivedAt, prevOpenMs: null };
+        g.eco = Economy(RULES, { pot: m.pot, vault: m.vault });
+        g.hatch = m.hatch; this.commit = m.commit;
+        if (m.reveal) this.check(m.reveal);
+        if (m.mine) this.openMine(m);
+        break;
+      case 'knock':
+        if (m.first) break;
+        Sound.knock(); g.shake = 0.45; g.hatch = 'shut'; g.mining = null; break;
+      case 'state': this.state(m); break;
+      case 'entered':
+        g.purse = Purse(RULES, m.purse); g.lampLit = true; g.oilLeft = m.oil; g.inShift = true; g.bag = [];
+        records.get().shifts++; records.save();
+        g.mode = 'ladder'; g.ladderK = 0; g.mx = g.mine.G.colX(g.mine.ladders[0].c); g.my = 0; g.mining = null;
+        g.say('Lamp lit for this shift' + (g.oilLeft ? ' · ' + g.oilLeft + ' measure' + (g.oilLeft > 1 ? 's' : '') + ' of oil' : ''), 2.5);
+        break;
+      case 'got': {
+        const n = g.nodes.find((q) => q.id === m.id);
+        if (n) { g.burst(24, n.x, n.y, n.z); g.removeNode(n); }
+        if (g.mining && g.mining.id === m.id) g.mining = null;
+        g.bag = m.bag.map((it) => this.item(it));
+        const it = m.item;
+        if (it.kind === 'amber') g.say('+' + fmt(it.value) + ' sats carried. Kept only past the hatch.', 2.5);
+        else if (it.kind === 'vault') g.say('The Vault piece! Worth a tenth of the Vault if you carry it out. Weight 10.', 5);
+        else g.say('+1 ' + it.kind + ' in the bag (weight ' + it.weight + ')', 2);
+        break;
+      }
+      case 'bag': g.bag = m.bag.map((it) => this.item(it)); break;
+      case 'snap': this.snap(m.place); break;
+      case 'banked': {
+        g.purse = Purse(RULES, m.purse); g.inShift = false; g.lampLit = false; g.oilLeft = 0;
+        const r = records.get(); r.totalPoints += m.kept; r.survived = (r.survived || 0) + 1; if (m.piece) r.vaultPieces = (r.vaultPieces || 0) + 1; records.save();
+        const mins = {}; for (const it of m.bag) if (it.kind !== 'amber' && it.kind !== 'vault') mins[it.kind] = (mins[it.kind] || 0) + 1;
+        g.bag = [];
+        if (m.kept || Object.keys(mins).length) {
+          g.say((m.piece ? 'The Vault piece is yours! ' : '') + 'Kept ' + [m.kept ? fmt(m.kept) + ' sats' : '', mineralText(mins)].filter(Boolean).join(' · ') + (m.kept ? ' (the Order takes a tenth)' : ''), 4);
+          const v = $('vaultCell'); v.classList.remove('flash'); void v.offsetWidth; v.classList.add('flash');
+        }
+        break;
+      }
+      case 'caught':
+        g.purse = Purse(RULES, m.purse); g.bag = []; g.inShift = false; g.lampLit = false; g.oilLeft = 0; g.drag = null; g.toSurface();
+        records.get().timesCaught++; records.save();
+        g.showOverlay('The deep is closed', 'The knock came before you reached the hatch. Your lamp and your bag (' + fmt(m.sats) + ' sats carried) are lost.');
+        break;
+      case 'purse':
+        g.purse = Purse(RULES, m.purse); if (m.item === 'oil') g.oilLeft = m.oil;
+        if (m.ok) Sound.tick();
+        if ($('shop').style.display === 'flex') g.openShop();
+        break;
+      case 'say': g.say(m.text, 3); break;
+    }
+  }
+  openMine(m) {
+    const g = this.g, v = m.mine;
+    g.nodes = []; this.others.forEach((o) => g.scene.remove(o.root)); this.others.clear();
+    g.mine = Object.assign({ S, R: RULES, G: MineGen.geometry(S, RULES), hash: v.look, nodes: [] }, v);
+    g.glims = new Map(); g.hatch = m.hatch;
+    g.buildMine();
+    if (!g.below() || !g.inShift) { g.toSurface(); g.lampLit = false; g.inShift = false; }
+    Sound.bell();
+    g.say('Block ' + m.height.toLocaleString() + ' · the hatch is open · ' + (v.minersBelow || 0) + ' miners in the shaft', 4);
+  }
+  state(m) {
+    const g = this.g; if (!g.mine) return;
+    g.hatch = m.hatch;
+    for (const n of m.nodes || []) {
+      if (g.nodes.some((q) => q.id === n.id)) continue;
+      const gl = g.glims.get(n.id); if (gl) { g.world.remove(gl); g.glims.delete(n.id); }
+      const node = Object.assign({ flash: 0 }, n); g.mine.nodes.push(node); g.showNode(node);
+    }
+    for (const n of m.glim || []) {   // ore glimmers faintly outside the light: no kind, no value
+      if (g.glims.has(n.id)) continue;
+      const s2 = g.glowSprite(0xff8a3a, 18, 0.16); s2.position.set(n.x, -n.y, 0); s2.material.depthTest = false; s2.renderOrder = 9;
+      g.world.add(s2); g.glims.set(n.id, s2);
+    }
+    for (const id of m.gone || []) {
+      const n = g.nodes.find((q) => q.id === id); if (n) g.removeNode(n);
+      const gl = g.glims.get(id); if (gl) { g.world.remove(gl); g.glims.delete(id); }
+      if (g.mining && g.mining.id === id) g.mining = null;
+    }
+    if (m.hp) for (const id in m.hp) { const n = g.nodes.find((q) => q.id === +id); if (n) n.hp = m.hp[id]; }
+    this.drawOthers(m.near || [], m.far || []);
+  }
+  snap(pl) {   // the server says he cannot be where the page put him: back to where he really is
+    const g = this.g, G = g.mine.G;
+    if (pl.k !== undefined) { g.mode = 'ladder'; g.ladderK = pl.k; g.mx = G.colX(g.mine.ladders[pl.k].c); g.my = pl.y; }
+    else { g.mode = 'ground'; g.lvl = pl.l; g.mx = pl.x; g.my = G.floorY(pl.l); g.ladderK = null; }
+    g.falling = null; g.vx = g.vy = 0;
+  }
+  figure() {   // another miner, near enough to see in full: the same model, his own animations
+    const g = this.g, mdl = g.A.models.miner, root = new THREE.Group(), turn = new THREE.Group(); turn.rotation.y = Math.PI / 2; root.add(turn);
+    const body = SkeletonUtils.clone(mdl.scene); turn.add(body);
+    body.traverse((q) => { if (q.isMesh) { q.castShadow = true; fogged(q.material); q.frustumCulled = false; } });
+    body.updateMatrixWorld(true); const box = new THREE.Box3().setFromObject(body), k = S.minerHeight / (box.max.y - box.min.y);
+    body.scale.setScalar(k); body.position.y = -box.min.y * k;
+    const mixer = new THREE.AnimationMixer(body), acts = {};
+    for (const clip of mdl.animations) acts[clip.name] = mixer.clipAction(clip);
+    const lamp = g.glowSprite(0xffc080, 46, 0.5); lamp.position.set(10, S.minerHeight * 0.45, 8); root.add(lamp);
+    g.scene.add(root);
+    return { root, mixer, acts, anim: null, x: null, y: null };
+  }
+  drawOthers(near, far) {
+    const g = this.g, G = g.mine.G, seen = new Set();
+    for (const q of near) {
+      seen.add(q.id);
+      let o = this.others.get(q.id); if (!o) { o = this.figure(); this.others.set(q.id, o); }
+      const pl = q.p, onLadder = pl.k !== undefined, x = onLadder ? G.colX(g.mine.ladders[pl.k].c) : pl.x, y = onLadder ? pl.y : G.floorY(pl.l);
+      const moving = o.x !== null && (Math.abs(x - o.x) > 0.5 || Math.abs(y - o.y) > 0.5);
+      const name = q.m ? 'swing' : onLadder ? 'climb' : moving ? 'walk' : 'idle';
+      if (o.anim !== name && o.acts[name]) { if (o.anim) o.acts[o.anim].fadeOut(0.2); o.acts[name].reset().fadeIn(0.2).play(); o.anim = name; }
+      o.x = x; o.y = y;
+      o.root.position.set(x, -y, onLadder ? -V.depth * 0.15 : 0);
+      o.root.rotation.y = onLadder ? -Math.PI / 2 : q.f < 0 ? Math.PI : 0;
+    }
+    for (const [id, o] of this.others) if (!seen.has(id)) { g.scene.remove(o.root); this.others.delete(id); }
+    // the far ones: a point of light each
+    while (this.lights.length < far.length) { const s2 = g.glowSprite(0xffc070, 26, 0.55); s2.material.depthTest = false; s2.renderOrder = 8; g.scene.add(s2); this.lights.push(s2); }
+    this.lights.forEach((s2, i) => { const f = far[i]; s2.visible = !!f; if (f) s2.position.set(f[0] * T, -f[1] * T + S.minerHeight * 0.5, V.depth * 0.3); });
+  }
+  async check(rev) {   // the fairness proof: last block's seed hashes to the fingerprint published when its hatch opened
+    if (!rev || !rev.seed || !crypto.subtle) return;
+    const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rev.seed));
+    const hex = [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    this.fair = { height: rev.height, ok: hex === rev.commit };
+    if (!this.fair.ok) console.warn('Block ' + rev.height + ': the revealed seed does not match its fingerprint');
   }
 }
 
