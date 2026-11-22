@@ -34,7 +34,8 @@
     regrowTiers: 2,
     regrowShareOfBudget: 0.25,                   // of each block's budget, kept back for regrowth
     richLevel1Chance: 0.1,                       // per block: a rich node on level 1 ...
-    richLevel1Lamps: 10,                         // ... worth about ten lamps
+    richLevel1Lamps: 10,                         // ... worth about ten lamps,
+    richMaxShare: 0.25,                          // ... but never more than a quarter of the block's amber (a small pot makes it smaller)
     swingsHardness: [1, 1.25, 1.5, 1.75, 2, 2.5],   // deeper nodes take more swings (times the clean/sloppy counts)
     amberValueSpread: 0.8,                       // pieces vary around their tier's value (a log-normal spread, mean kept)
 

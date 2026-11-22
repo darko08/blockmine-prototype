@@ -81,8 +81,9 @@ function runCrowd(miners, shiftsPerStrategy, seed, vaultRace) {
     const layout = pool[Math.floor(rng() * pool.length)];
     const B = expo(rng, R.secondsPerLevel * 0 + 600);              // the block lasts this long
     // this block's ore, valued from the pot's budget (the drop table gives the ratios)
-    const budget = eco.budget(), rich = rng() < R.richLevel1Chance ? R.richLevel1Lamps * R.lampPrice : 0;
-    const now = budget * (1 - R.regrowShareOfBudget) - rich;
+    const budget = eco.budget(), placing = budget * (1 - R.regrowShareOfBudget);
+    const rich = rng() < R.richLevel1Chance ? Math.floor(Math.min(R.richLevel1Lamps * R.lampPrice, placing * R.richMaxShare)) : 0;
+    const now = placing - rich;
     const ratioSum = layout.base.reduce((a, n) => a + Math.max(0, n.ratio), 0), per = Math.max(0, now) / ratioSum;
     const spread = () => Math.exp(R.amberValueSpread * gauss(rng) - R.amberValueSpread * R.amberValueSpread / 2);   // mean 1
     const nodes = layout.base.map((n, i) => ({ id: i, l: n.l, x: n.x, kind: n.kind, weight: n.weight, hard: n.hard, value: n.ratio > 0 ? Math.floor(n.ratio * per * spread()) : n.ratio < 0 ? (rich ? rich : 0) : 0, taken: false }));

@@ -118,8 +118,9 @@
       for (let i = 0; i < Math.round(R.materialNodesPerLevel[t] * scale); i++) plan.push({ l, kind: R.materials[t][Math.floor(rng() * R.materials[t].length)] });
     }
     // a rich node on level 1, now and then: worth about ten lamps
-    const rich = rng() < R.richLevel1Chance ? R.richLevel1Lamps * R.lampPrice : 0;
-    const now = budget * (1 - R.regrowShareOfBudget) - rich;
+    const placing = budget * (1 - R.regrowShareOfBudget);
+    const rich = rng() < R.richLevel1Chance ? Math.floor(Math.min(R.richLevel1Lamps * R.lampPrice, placing * R.richMaxShare)) : 0;
+    const now = placing - rich;
     const ratioSum = plan.reduce((a, p) => a + (p.ratio || 0), 0);
     const perRatio = ratioSum > 0 ? Math.max(0, now) / ratioSum : 0;
     mine.amberPlaced = 0;
