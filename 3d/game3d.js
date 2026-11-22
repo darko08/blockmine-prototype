@@ -34,7 +34,8 @@ const V = {
   lampHook: [0.04, 0.02, 0.15],   // the belt hook, from his hips: forward, up, to his right (shares of his height)
   turnRate: 7,               // how quickly he turns to face a new way (higher = snappier)
   pickLength: 0.48,          // the pick, end to end, as a share of his height (a real pick is about 0.9 m)
-  bagBack: 0.09,             // how far behind his chest bone the bag hangs (his back is about 0.1 behind it)
+  bagBack: 0.0,              // the strap's top: right over his shoulders, level with his chest bone front to back
+  bagUp: 0.17, bagLean: -0.38, bagSwing: 0.5,   // the strap's top above his chest bone; the sack leans back onto his back; it swings half as freely
   pileScale: 1.3,            // 3D deposit piles are this much taller than the 2D pile heights (their base is wide rubble)
   walkStride: 50,            // world units per cycle of the Mixamo walk (a man 1.8 m tall: about 1.65 m)
   climbStride: 18,           // world units climbed per cycle of the Mixamo ladder climb (about two rungs)
@@ -373,7 +374,7 @@ class Game {
     this.bags = {};
     for (const [k, h] of [['empty', 0.46], ['half', 0.5], ['full', 0.56]]) {
       const holder = new THREE.Group(), o = place(this.A.models['bag_' + k], H * h, { cloneMat: true });
-      o.rotation.y = -Math.PI / 2 + 0.35;   // its front faces backward, turned a little toward you
+      o.rotation.y = -Math.PI / 2;   // its front faces backward
       o.position.y = -H * h; holder.userData.h = h;   // the holder is the strap's top, at his shoulder
       holder.add(o); holder.visible = false; g.add(holder);
       holder.userData.mats = []; o.traverse((m) => m.isMesh && holder.userData.mats.push(m.material));
@@ -833,13 +834,13 @@ class Game {
       if (this.mode === 'ladder' && this.bones.chest) {   // both hands on the rungs: the pick rides across his back, head up by his shoulder
         const c = at(this.bones.chest), sy = up.clone().multiplyScalar(0.85).addScaledVector(right, -0.5).normalize();
         const sx = new THREE.Vector3().crossVectors(sy, face).normalize(), sz = new THREE.Vector3().crossVectors(sx, sy);
-        this.pick.matrix.makeBasis(sx, sy, sz).setPosition(c.addScaledVector(face, -H * (V.bagBack + 0.08)).addScaledVector(up, -H * 0.3).addScaledVector(right, H * 0.1));
+        this.pick.matrix.makeBasis(sx, sy, sz).setPosition(c.addScaledVector(face, -H * 0.17).addScaledVector(up, -H * 0.3).addScaledVector(right, H * 0.1));
       }
       this.pick.matrixWorldNeedsUpdate = true;
     }
     if (this.bones.chest) {   // the bag hangs from his shoulders, against his back, leaning with him
       const c = at(this.bones.chest);
-      for (const k in this.bags) { const b = this.bags[k]; b.position.copy(c).addScaledVector(face, -H * V.bagBack).addScaledVector(up, H * 0.1); b.rotation.set(this.bagRoll || 0, bodyYaw, -0.1 + (this.bagAng || 0)); }
+      for (const k in this.bags) { const b = this.bags[k]; b.position.copy(c).addScaledVector(face, -H * V.bagBack).addScaledVector(up, H * V.bagUp); b.rotation.set((this.bagRoll || 0) * V.bagSwing, bodyYaw, V.bagLean + (this.bagAng || 0) * V.bagSwing); }
     }
     // the bag on his back: flat at 0, half-full from 1, full from bagFullAt; its ore glows only with ore in it
     const bw = this.bagWeight(), fill = Math.min(1, bw / S.bagCapacity), hasOre = this.bag.length > 0;
