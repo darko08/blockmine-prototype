@@ -60,6 +60,8 @@ function runCrowd(miners, shiftsPerStrategy, seed, vaultRace) {
   const eco = Economy(R);
   const pool = makePool(miners, 24, seed);
   const stats = {}; NAMES.forEach((n) => (stats[n] = { shifts: 0, caught: 0, kept: [], below: 0, reached15: 0, ahead: 0, cost: 0 }));
+  const books = { blocks: 0, start: null, secs: 0, budget: 0, lamps: 0, oil: 0, amberOut: 0, amberCaught: 0, kept: 0, vaultPieces: 0, vaultPaid: 0, caught: 0, out: 0 };
+  const lv = Array.from({ length: R.levels }, () => ({ amber: 0, amberSats: 0, amberTaken: 0, amberTakenSats: 0, regrownAmber: 0, regrownMat: 0, rich: 0, richSats: 0, coal: 0, iron: 0, silver: 0, matTaken: 0, values: [] }));
   let minPot = Infinity, blocks = 0;
   const warm = ADAPT ? 3000 : 300;           // blocks before measuring, so the pot (and the crowd) settles
   // the crowd learns: each strategy's share of the miners drifts toward what has paid lately (never below a floor,
@@ -86,12 +88,18 @@ function runCrowd(miners, shiftsPerStrategy, seed, vaultRace) {
     const now = placing - rich;
     const ratioSum = layout.base.reduce((a, n) => a + Math.max(0, n.ratio), 0), per = Math.max(0, now) / ratioSum;
     const spread = () => Math.exp(R.amberValueSpread * gauss(rng) - R.amberValueSpread * R.amberValueSpread / 2);   // mean 1
-    const nodes = layout.base.map((n, i) => ({ id: i, l: n.l, x: n.x, kind: n.kind, weight: n.weight, hard: n.hard, value: n.ratio > 0 ? Math.floor(n.ratio * per * spread()) : n.ratio < 0 ? (rich ? rich : 0) : 0, taken: false }));
+    const nodes = layout.base.map((n, i) => ({ id: i, l: n.l, x: n.x, kind: n.kind, weight: n.weight, hard: n.hard, rich: n.ratio < 0, value: n.ratio > 0 ? Math.floor(n.ratio * per * spread()) : n.ratio < 0 ? (rich ? rich : 0) : 0, taken: false }));
+    // a rich block: the rich node lies somewhere on level 1 (the layouts are shared, so it is placed here, not in the layout)
+    if (rich && !nodes.some((n) => n.rich)) { const l0 = layout.levels[0]; nodes.push({ id: nodes.length, l: 0, x: l0.a + rng() * (l0.b - l0.a), kind: 'amber', weight: R.weight.amber, hard: R.swingsHardness[0], rich: true, value: rich, taken: false }); }
+    nodes.forEach((n) => { if (n.rich && !rich) n.value = 0; });
+    const placed = nodes.length;
     let regrowLeft = budget - nodes.reduce((a, n) => a + n.value, 0);
     const byLevel = layout.levels.map(() => []); nodes.forEach((n) => byLevel[n.l].push(n));
     // shallow regrowth during the block, from what the budget keeps back
     const regrowTimes = []; for (let t = R.regrowEverySeconds; t < B; t += R.regrowEverySeconds) regrowTimes.push(t);
     let vaultTaken = false, dropped = [];
+    if (measuring && !books.start) books.start = eco.toJSON();
+    if (measuring) { books.secs += B; books.budget += budget; }
     // the miners of this block: each draws a strategy (a relay pair takes two places)
     const crew = [];
     for (let k = 0; k < (vaultRace || 0); k++) crew.push({ name: 'vault runner', racer: true });   // the Vault race: this many runners every block
@@ -209,8 +217,10 @@ function runCrowd(miners, shiftsPerStrategy, seed, vaultRace) {
       p.below = Math.min(p.t, B) - p.start;
       const amber = p.bag.reduce((a, it) => a + (it.kind === 'amber' ? it.value : 0), 0);
       let kept = 0;
-      if (p.out) kept = eco.carriedOut(amber, p.vault ? eco.vaultPieceValue() : 0);
+      const piece = p.out && p.vault ? eco.vaultPieceValue() : 0;
+      if (p.out) kept = eco.carriedOut(amber, piece);
       else if (p.started) { p.caught = true; eco.caught(amber); }
+      if (measuring) { books.lamps++; books.oil += p.oil || 0; if (p.out) { books.out++; books.amberOut += amber; books.kept += kept; if (p.vault) { books.vaultPieces++; books.vaultPaid += piece; } } else if (p.started) { books.caught++; books.amberCaught += amber; } }
       const cost = R.lampPrice + (p.oil || 0) * R.oilPrice;
       eco.sale(cost);
       minPot = Math.min(minPot, eco.pot);
@@ -223,9 +233,23 @@ function runCrowd(miners, shiftsPerStrategy, seed, vaultRace) {
       if (p.deepest >= 14) st.reached15++;
       if (kept > cost) st.ahead++;
     }
+    if (measuring) {
+      books.blocks++;
+      nodes.forEach((n, k) => {
+        const v = lv[n.l]; if (!v || n.kind === 'vault') return;
+        const regrown = k >= placed;
+        if (n.kind === 'amber') {
+          if (n.rich) { if (n.value > 0) { v.rich++; v.richSats += n.value; } }
+          else { v.amber++; v.amberSats += n.value; if (v.values.length < 20000) v.values.push(n.value); if (regrown) v.regrownAmber++; }
+          if (n.taken) { v.amberTaken++; v.amberTakenSats += n.value; }
+        } else { v[n.kind]++; if (regrown) v.regrownMat++; if (n.taken) v.matTaken++; }
+      });
+    }
   }
   // summarise
-  const out = { miners, blocks, minPot, eco: eco.check(), share: { ...share }, strategies: {} };
+  books.end = eco.toJSON();
+  lv.forEach((v) => { const a = v.values.sort((x, y) => x - y), q = (f) => a.length ? a[Math.floor(f * (a.length - 1))] : 0; v.p10 = q(0.1); v.p50 = q(0.5); v.p90 = q(0.9); v.max = a.length ? a[a.length - 1] : 0; delete v.values; });
+  const out = { miners, blocks, minPot, eco: eco.check(), share: { ...share }, books, levels: lv, strategies: {} };
   for (const n of NAMES) {
     const st = stats[n], k = st.kept.sort((a, b) => a - b), N = k.length;
     const mean = k.reduce((a, b) => a + b, 0) / N, costPer = st.cost / st.shifts;
