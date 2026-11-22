@@ -41,7 +41,7 @@ const V = {
   amberEmissive: [0.35, 0.55, 0.8, 1.1],    // amber (the sats) glows more the deeper it lies
   vaultMonHeight: 120, vaultMonZ: -880, vaultMonSide: 0.5, vaultHalf: 15000,
   vaultPaintWidth: 2200, vaultPaintFloor: 0.88, vaultPaintTop: 0.08, vaultPaintX: 0, vaultScale: 20000,
-  stormCrop: 0.62, porterSize: 0.07, porterEvery: 17, boltEvery: 14,   // the storm: how much of the painting shows, porters' size and pace, lightning   // the painted Vault: share of the view's width, gap under the top bar   // the painted Vault: its width, where its floor meets the ground, how it fills
+  stormCrop: 1, stormAspect: 1344 / 3168, porterSize: 0.07, porterEvery: 17, boltEvery: 14,   // the storm: how much of the painting shows, porters' size and pace, lightning   // the painted Vault: share of the view's width, gap under the top bar   // the painted Vault: its width, where its floor meets the ground, how it fills
   vaultMonUnused: 0,   // the Great Vault on the surface: its height, its depth (just before the sky), how far left in the view
   ghostMiners: 100, ghostSeed: 15000,                      // practice: a simulated crowd this size; the Vault starts where it keeps it
   ghostTricklePerBlock: 410, ghostKnockPerBlock: 190, ghostPiecesPerBlock: 0.49,   // its flows, from the simulator's projection
@@ -636,9 +636,9 @@ class Game {
   // ground and up the long staircase into the gate; each one adds what he carries to the count. At the knock the line
   // thickens with the bags of the caught; when a piece is carried out, the gate flares and a porter brings one down.
   buildVaultShow() {
-    const g = this.vaultMon = new THREE.Group(), Wp = V.vaultPaintWidth, CROP = V.stormCrop, Hp = Wp / CROP * 1536 / 2752;
+    const g = this.vaultMon = new THREE.Group(), Wp = V.vaultPaintWidth, CROP = V.stormCrop, Hp = Wp / CROP * V.stormAspect;
     this.vaultDims = { Wp, Hp };
-    const tex = new THREE.TextureLoader().load('storm/surface.webp?v=1'); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const tex = new THREE.TextureLoader().load('storm/town.webp?v=1'); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     this.vaultPaintMat = new THREE.ShaderMaterial({
       uniforms: { map: { value: tex }, crop: { value: CROP }, flash: { value: 0 }, glow: { value: 0.5 } },
       transparent: true, depthWrite: false, toneMapped: false,
@@ -650,7 +650,7 @@ class Game {
           float lum = dot(col, vec3(0.3, 0.5, 0.2)), warm = clamp((col.r - col.b) * 2.0, 0.0, 1.0);
           col *= 0.9 + 0.5 * warm * glow;                        // the night a touch darker; the gate's warmth grows with the Vault
           col += flash * vec3(0.55, 0.62, 0.8) * (0.25 + lum);     // lightning
-          float edge = smoothstep(0.0, 0.12, vUv.x) * smoothstep(0.0, 0.14, 1.0 - vUv.x) * smoothstep(0.0, 0.03, vUv.y) * smoothstep(0.0, 0.06, 1.0 - vUv.y);
+          float edge = smoothstep(0.0, 0.05, vUv.x) * smoothstep(0.0, 0.05, 1.0 - vUv.x) * smoothstep(0.0, 0.03, vUv.y) * smoothstep(0.0, 0.06, 1.0 - vUv.y);
           gl_FragColor = vec4(col, edge);
           #include <colorspace_fragment>
         }`,
@@ -659,7 +659,7 @@ class Game {
     // painting coordinates (u across the whole painting, v down) to the group's own coordinates
     this.paintAt = (u, v, z = 2) => new THREE.Vector3((u / CROP - 0.5) * Wp, (0.5 - v) * Hp, z);
     // the porters' way: in from the right along the ground, then up the three flights of the staircase into the gate
-    this.porterPath = [[0.64, 0.83], [0.56, 0.8], [0.484, 0.781], [0.3225, 0.586], [0.404, 0.505], [0.286, 0.391], [0.263, 0.358], [0.262, 0.33]].map(([u, v]) => this.paintAt(u, v, 3));
+    this.porterPath = [[0.66, 0.8], [0.52, 0.81], [0.43, 0.8], [0.3505, 0.79], [0.243, 0.596], [0.297, 0.507], [0.218, 0.395], [0.199, 0.369], [0.196, 0.343]].map(([u, v]) => this.paintAt(u, v, 3));
     this.porterLen = []; let L = 0; for (let i = 1; i < this.porterPath.length; i++) { L += this.porterPath[i].distanceTo(this.porterPath[i - 1]); this.porterLen.push(L); }
     this.porterTotal = L;
     // a porter: a hooded figure bent under a sack of glowing ore, drawn here as a jointed figure in every pose of
@@ -673,20 +673,30 @@ class Game {
     this.porterFrames = NF;
     this.porters = [];
     // the gate's light, and the count beside it
-    this.gateGlow = this.glowSprite(0xff9a3a, Wp * 0.22, 0.4); this.gateGlow.position.copy(this.paintAt(0.262, 0.27, 2.5)); this.gateGlow.material.toneMapped = false; g.add(this.gateGlow);
+    this.gateGlow = this.glowSprite(0xff9a3a, Wp * 0.22, 0.4); this.gateGlow.position.copy(this.paintAt(0.2, 0.25, 2.5)); this.gateGlow.material.toneMapped = false; g.add(this.gateGlow);
     const c = document.createElement('canvas'); c.width = 640; c.height = 300;
     this.vaultSign = { c, ctx: c.getContext('2d'), tex: new THREE.CanvasTexture(c), shown: -1, at: 0 };
     this.vaultSign.tex.colorSpace = THREE.SRGBColorSpace;
     const sign = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.vaultSign.tex, transparent: true, depthWrite: false, toneMapped: false }));
-    sign.scale.set(Wp * 0.36, Wp * 0.36 * 300 / 640, 1); g.add(sign); this.vaultSignSprite = sign;
-    // rain: slanting streaks over the whole scene, in two depths
-    const RN = 900, rg = new THREE.BufferGeometry(); this.rainPos = new Float32Array(RN * 6); this.rain = [];
-    for (let i = 0; i < RN; i++) this.rain.push({ x: Math.random(), y: Math.random(), z: Math.random() < 0.6 ? 0 : 1, s: 0.6 + Math.random() * 0.6 });
-    rg.setAttribute('position', new THREE.BufferAttribute(this.rainPos, 3));
-    this.rainLines = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: 0x8fa0bc, transparent: true, opacity: 0.35, depthWrite: false })); this.rainLines.frustumCulled = false;
-    this.scene.add(this.rainLines);
+    sign.scale.set(Wp * 0.2, Wp * 0.2 * 300 / 640, 1); g.add(sign); this.vaultSignSprite = sign;
+    // the town lives: lit windows that flicker (now and then one goes dark or lights), gas lamps, the clock, chimney smoke
+    const at = (x, y) => [x / 1400, y / 594];   // places traced on the 1400-wide preview
+    this.townLights = [
+      ...[[862, 398], [905, 383], [930, 356], [978, 349], [1000, 372], [1026, 370], [1140, 370], [1255, 325], [1312, 330], [880, 362]].map((q) => ({ q: at(...q), kind: 'window', size: 0.012 })),
+      ...[[953, 348], [1068, 352], [1296, 348], [1278, 360]].map((q) => ({ q: at(...q), kind: 'lamp', size: 0.02 })),
+      ...[[1028, 199], [1047, 199]].map((q) => ({ q: at(...q), kind: 'clock', size: 0.016 })),
+    ].map((L) => {
+      const s = this.glowSprite(L.kind === 'clock' ? 0xffe2a0 : 0xffb050, Wp * L.size, 0.5); s.material.toneMapped = false;
+      s.position.copy(this.paintAt(L.q[0], L.q[1], 2.2)); g.add(s);
+      return Object.assign(L, { s, ph: Math.random() * 10, on: 1, next: 3 + Math.random() * 20 });
+    });
+    const sm = document.createElement('canvas'); sm.width = sm.height = 64; const sx = sm.getContext('2d'), sgr = sx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    sgr.addColorStop(0, 'rgba(150,150,160,0.5)'); sgr.addColorStop(1, 'rgba(150,150,160,0)'); sx.fillStyle = sgr; sx.fillRect(0, 0, 64, 64);
+    this.smokeTex = new THREE.CanvasTexture(sm);
+    this.chimneys = [[800, 240], [880, 265], [940, 285], [1100, 290], [1380, 245], [1232, 287]].map((q) => this.paintAt(...at(...q), 2.1));
+    this.smoke = [];
     this.stormLight = new THREE.AmbientLight(0xb8c8ff, 0); this.scene.add(this.stormLight);   // lightning lights the headframe and him too
-    this.vs = { shown: null, carry: 0, flash: 0, lightning: 0, nextBolt: 4 + Math.random() * 6, spawn: 0, queue: [], pending: 0 };
+    this.vs = { smokeT: 0, shown: null, carry: 0, flash: 0, lightning: 0, nextBolt: 4 + Math.random() * 6, spawn: 0, queue: [], pending: 0 };
     this.scene.add(g);
   }
   // one pose of a porter, facing right, feet on y = 92 of a 64x96 frame. p: where in the stride (0..1).
@@ -748,16 +758,17 @@ class Game {
   fitVault() {
     const { Hp } = this.vaultDims, cam = this.camera, depth = this.camDist - V.vaultMonZ, tan = Math.tan(THREE.MathUtils.degToRad(V.fov / 2));
     const camY = cam.position.y || 0, top = camY + depth * tan * (1 - 2 * V.vaultPaintTop), ground = camY + (0 - camY) * depth / this.camDist;
-    const h = Math.max(50, (top - ground) / V.vaultPaintFloor), k = h / Hp;
+    const visW = 2 * depth * tan * cam.aspect, Wp = this.vaultDims.Wp, hFit = Math.max(50, (top - ground) / V.vaultPaintFloor) / Hp;
+    const gateFit = (top - ground) / (V.vaultPaintFloor - 0.03) / Hp;   // the largest it can be with the gate's top still in view
+    const k = Math.max(hFit, Math.min(visW * 1.04 / Wp, gateFit)), h = Hp * k;   // fill a wide screen as far as the gate allows
     this.vaultMon.scale.setScalar(k);
-    const visW = 2 * depth * tan * cam.aspect, hx = this.mine.G.colX(this.mine.c0);
-    let x = hx - this.vaultDims.Wp * k * 0.5 - visW * 0.03 + V.vaultPaintX;   // its right edge just short of the hatch
-    const ray = new THREE.Vector3(-1, 0, 0.5).unproject(cam).sub(cam.position), viewLeft = cam.position.x + ray.x * (V.vaultMonZ - cam.position.z) / ray.z, gateLeft = x + this.vaultDims.Wp * k * (0.13 / V.stormCrop - 0.5);
+    const ray = new THREE.Vector3(-1, 0, 0.5).unproject(cam).sub(cam.position), viewLeft = cam.position.x + ray.x * (V.vaultMonZ - cam.position.z) / ray.z;
+    let x = viewLeft + visW / 2 + V.vaultPaintX;   // centred on the view: the cliff and the stairs left of the hatch, the town right of it
+    const gateLeft = x + Wp * k * (0.1 - 0.5);
     if (gateLeft < viewLeft + visW * 0.02) x += viewLeft + visW * 0.02 - gateLeft;   // a narrow phone: slide it right so the whole gate shows
-    this.vaultMon.position.set(x, top - h / 2, V.vaultMonZ);
-    const uLeft = (viewLeft - (x - this.vaultDims.Wp * k / 2)) / (this.vaultDims.Wp * k) * V.stormCrop;   // the painting's u at the screen's left edge
-    this.vaultSignSprite.position.copy(this.paintAt(Math.max(0.11, uLeft + 0.12), 0.5, 4));   // the count on the cliff, under the gate, always in view
-    this.stormBox = { cx: cam.position.x, cy: camY, w: visW, h: 2 * depth * tan, z: V.vaultMonZ + 30 };
+    this.vaultMon.position.set(x, ground + (V.vaultPaintFloor - 0.5) * h, V.vaultMonZ);   // its floor on the ground line
+    const uLeft = (viewLeft - (x - Wp * k / 2)) / (Wp * k);   // the painting's u at the screen's left edge
+    this.vaultSignSprite.position.copy(this.paintAt(Math.max(0.08, uLeft + 0.09), 0.55, 4));   // the count on the cliff, under the gate, always in view
   }
   vaultTruth() { return Math.max(0, Math.floor(this.eco ? this.eco.vault : 0)); }
   vaultFill(v) { return 2 * (1 - Math.exp(-v / V.vaultScale)); }
@@ -766,7 +777,7 @@ class Game {
     if (kind === 'out') {   // the gate flares; one porter brings a piece down and away
       this.vs.shown = Math.max(0, (this.vs.shown == null ? this.vaultTruth() : this.vs.shown) - amount); this.vs.flash = 1;
       this.porter(0, true);
-      const p = this.vaultMon.localToWorld(this.paintAt(0.262, 0.3, 4)), sp = this.screen(p.x, -p.y, p.z);
+      const p = this.vaultMon.localToWorld(this.paintAt(0.2, 0.3, 4)), sp = this.screen(p.x, -p.y, p.z);
       if (sp.x > 0 && sp.x < innerWidth && sp.y > 0 && sp.y < innerHeight) this.floatAt(sp.x, sp.y, '−' + fmt(amount) + ' · a Vault piece carried out' + (who ? ' by ' + who : ''));
       if (!this.below()) this.say((who || 'A miner') + ' carried out a Vault piece: ' + fmt(amount) + ' sats.', 3.5);
       return;
@@ -791,7 +802,7 @@ class Game {
     const P = this.porterPath, Ls = this.porterLen;
     let i = 0; while (i < Ls.length - 1 && d > Ls[i]) i++;
     const a = P[i], b = P[i + 1], l0 = i ? Ls[i - 1] : 0, f = Math.min(1, Math.max(0, (d - l0) / (Ls[i] - l0)));
-    return { p: a.clone().lerp(b, f), dx: b.x - a.x, onStairs: i >= 2, leg: i };
+    return { p: a.clone().lerp(b, f), dx: b.x - a.x, onStairs: i >= 3, leg: i };
   }
   vaultShowStep(dt) {
     if (!this.vaultMon) return;
@@ -841,19 +852,28 @@ class Game {
     }
     this.vaultPaintMat.uniforms.flash.value = up ? this.vs.lightning * 0.9 : 0;
     this.stormLight.intensity = up ? this.vs.lightning * 2.2 : 0;
-    // rain over the view, slanting, faster in front
-    const B = this.stormBox;
-    if (B && up) {
-      this.rainLines.visible = true;
-      const rp = this.rainPos;
-      this.rain.forEach((r, i) => {
-        r.y -= dt * r.s * (r.z ? 1.15 : 0.75); if (r.y < 0) { r.y += 1; r.x = Math.random(); }
-        const zz = r.z ? B.z * 0.35 : B.z, k = (this.camDist - zz) / (this.camDist - B.z), w = B.w * k, h = B.h * k;
-        const x = B.cx - w / 2 + r.x * w * 1.1, y = B.cy - h / 2 + r.y * h, len = h * (r.z ? 0.05 : 0.03);
-        rp.set([x, y, zz, x - len * 0.25, y + len, zz], i * 6);
-      });
-      this.rainLines.geometry.attributes.position.needsUpdate = true;
-    } else this.rainLines.visible = false;
+    // the town: windows flicker like oil lamps, and now and then one goes out or comes on; the gas lamps hum; smoke drifts
+    for (const L of this.townLights) {
+      L.next -= dt; if (L.kind === 'window' && L.next <= 0) { L.on = L.on ? 0 : 1; L.next = L.on ? 8 + Math.random() * 30 : 2 + Math.random() * 6; }
+      const flick = L.kind === 'window' ? 0.75 + 0.25 * Math.sin(this.clock * 7.3 + L.ph) * Math.sin(this.clock * 3.1 + L.ph * 2) : L.kind === 'lamp' ? 0.9 + 0.1 * Math.sin(this.clock * 13 + L.ph) : 1;
+      L.cur = (L.cur == null ? L.on : L.cur) + (L.on - (L.cur == null ? L.on : L.cur)) * Math.min(1, dt * 3);
+      L.s.material.opacity = (up ? 1 : 0) * L.cur * flick * (L.kind === 'clock' ? 0.55 : 0.7);
+    }
+    this.vs.smokeT -= dt;
+    if (this.vs.smokeT <= 0 && this.smoke.length < 40) {
+      this.vs.smokeT = 0.35;
+      const c = this.chimneys[Math.floor(Math.random() * this.chimneys.length)], s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.smokeTex, transparent: true, depthWrite: false, opacity: 0 }));
+      s.position.copy(c); s.renderOrder = -1; const sz = this.vaultDims.Hp * 0.02; s.scale.set(sz, sz, 1); this.vaultMon.add(s);
+      this.smoke.push({ s, t: 0, life: 5 + Math.random() * 3, sz });
+    }
+    this.smoke = this.smoke.filter((m) => {
+      m.t += dt; const f = m.t / m.life;
+      if (f >= 1) { this.vaultMon.remove(m.s); m.s.material.dispose(); return false; }
+      m.s.position.x -= dt * this.vaultDims.Hp * 0.012; m.s.position.y += dt * this.vaultDims.Hp * 0.008;   // bent by the wind
+      const sz = m.sz * (1 + f * 2.5); m.s.scale.set(sz, sz, 1);
+      m.s.material.opacity = (up ? 1 : 0) * 0.5 * Math.sin(Math.PI * f);
+      return true;
+    });
     this.drawVaultSign();
   }
   // thunder: a deep rumble of filtered noise, rolling in a moment after the flash (an effect: the sound button silences it)
