@@ -80,6 +80,11 @@
   #records table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; }
   #records td { padding: 5px 0; } #records td:last-child { text-align: right; color: #ffb547; }
   #records .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  /* banked so far: lights up when a bag is banked at the hatch */
+  #vaultSats { color: #ffb547; }
+  #vaultCell.flash .bar { animation: banked 1.6s ease-out; }
+  @keyframes banked { 0% { box-shadow: 0 0 0 2px #ffb547, 0 0 28px 6px rgba(255,181,71,.8); } 100% { box-shadow: inset 0 0 0 3px rgba(0,0,0,.75), inset 0 0 0 4px rgba(176,141,87,.45), 0 2px 8px rgba(0,0,0,.6); } }
+  @media (max-width: 640px) { #vaultCell small { display: none; } #left { flex-wrap: wrap; row-gap: 4px; min-width: 0; } }
   #prompt { position: fixed; display: none; transform: translate(-50%, -50%); pointer-events: none; z-index: 3; align-items: center; gap: 3px;
     padding: 1px 6px; background: rgba(8,6,4,.85); border: 1px solid #b08d57; font-size: 16px; font-weight: 600; color: #efe8da; }
   #prompt svg { width: 16px; height: 16px; }
@@ -95,6 +100,7 @@
       <div id="left">
         <div class="cell"><div class="bar"><span>Oil</span><b id="oil">100</b></div></div>
         <div class="cell"><div class="bar"><span>Bag</span><b id="bagW">0/10</b><b id="bagSats">0</b><span>sats</span></div><small id="bag">no minerals</small></div>
+        <div class="cell" id="vaultCell"><div class="bar"><span>Banked</span><b id="vaultSats">0</b><span>sats</span></div><small id="vault">no minerals</small></div>
       </div>
       <div class="cell" id="clockCell">
         <div class="bar"><span>Block</span><b id="blockNum">–</b><span>Open</span><b id="blockOpen">0:00</b></div>
@@ -142,6 +148,6 @@
 <script src="../js/chain.js?v=6"></script>
 <script src="../js/records.js?v=5"></script>
 <script src="../cutaway/mine.js?v=10"></script>
-<script type="module" src="game3d.js?v=10"></script>
+<script type="module" src="game3d.js?v=13"></script>
 </body>
 </html>
