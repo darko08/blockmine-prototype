@@ -273,11 +273,18 @@ class Game {
           const pit = new THREE.Mesh(new THREE.BoxGeometry(t.x1 - t.x0, S.pitDepth * T, D * 0.98), fogged(new THREE.MeshStandardMaterial({ color: 0x050302, roughness: 1 })));
           pit.position.set((t.x0 + t.x1) / 2, -(fy + S.pitDepth * T / 2) + 0.6, 0); pit.userData.own = true; this.world.add(pit);
         } else {
-          const r2 = seededRandom(m.hash + '|rubble' + t.x0), mat = fogged(new THREE.MeshStandardMaterial({ map: this.A.rock[G.zone(l)], color: 0x8a7f72, roughness: 1 }));
-          for (let k = 0; k < 9; k++) {
-            const s = (t.x1 - t.x0) * (0.18 + 0.16 * r2()), st = new THREE.Mesh(new THREE.DodecahedronGeometry(s / 2, 0), mat);
-            st.position.set(t.x0 + (t.x1 - t.x0) * (0.15 + 0.7 * r2()), -(fy + 2) + s * 0.35 * (0.6 + r2() * 0.6) * (t.h / S.rubbleHeight), (r2() - 0.5) * D * 0.8);
-            st.rotation.set(r2() * 3, r2() * 3, r2() * 3); st.castShadow = st.receiveShadow = true; st.userData.own = true; this.world.add(st);
+          const r2 = seededRandom(m.hash + '|rubble' + t.x0), mat = fogged(new THREE.MeshStandardMaterial({ color: 0x6f655b, roughness: 0.9, flatShading: true }));
+          // a heap of rocks as tall as the mound that blocks him, across the whole depth of the tunnel, so it reads as a
+          // barrier to jump over: bigger stones at the bottom and middle, smaller ones on top
+          // drawn as the 2D game draws it: about twice the height that stops him, and 1.4 times as wide
+          const w = (t.x1 - t.x0) * 1.4, cx = (t.x0 + t.x1) / 2, n = 30, top = t.h * 2.0;
+          for (let k = 0; k < n; k++) {
+            const u = (r2() - 0.5) * 2, z = (r2() - 0.5) * D * 0.9, peak = top * (1 - 0.6 * u * u);
+            const r = Math.max(2.5, top * (0.2 + 0.14 * r2()) * (1 - 0.35 * Math.abs(u)));
+            const st = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), mat);
+            st.position.set(cx + u * w * 0.5, -(fy - Math.max(r * 0.55, peak - r * 0.7 - r2() * top * 0.3)), z);
+            st.scale.set(1.25, 0.8, 1); st.rotation.set(r2() * 3, r2() * 3, r2() * 3);
+            st.castShadow = st.receiveShadow = true; st.userData.own = true; this.world.add(st);
           }
         }
       }
@@ -608,7 +615,10 @@ class Game {
       }
       if (dir && !this.mining) {
         this.facing = dir;
-        const nx = clamp(this.blockRubble(this.lvl, this.mx, this.mx + dir * S.runSpeed * f * dt, fy), x0, x1);
+        const want = this.mx + dir * S.runSpeed * f * dt, nx = clamp(this.blockRubble(this.lvl, this.mx, want, fy), x0, x1);
+        if (Math.abs(nx - want) > 1e-6 && nx === this.blockRubble(this.lvl, this.mx, want, fy) && performance.now() > (this.rubbleHintAt || 0)) {
+          this.say('Rubble in the way. Jump over it.', 2); this.rubbleHintAt = performance.now() + 4000;
+        }
         this.moving = Math.abs(nx - this.mx) > 1e-3; this.walkDist += Math.abs(nx - this.mx); this.mx = nx;
       }
       const gap = this.terrainAt(this.lvl, this.mx, 'gap');
