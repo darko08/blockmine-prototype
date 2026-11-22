@@ -1,0 +1,8 @@
+{"miners":10,"secs":151,"blocks":4,"peakBelow":10,"tickAvgMs":0.14,"tickMaxMs":3.8,"rssMB":59,"cpuPct":0,"kbPerMinerPerSec":2,"rttP50":0,"rttP95":1,"rttMax":3,"honestSnaps":0,"cheaterSnaps":0,"cheaters":0,"banked":0,"caught":30,"satsKept":0,"rejectedMoves":0,"potNeverOverpaid":true}
+{"miners":50,"secs":151,"blocks":0,"peakBelow":50,"tickAvgMs":0.47,"tickMaxMs":3.3,"rssMB":63,"cpuPct":2,"kbPerMinerPerSec":3,"rttP50":0,"rttP95":1,"rttMax":3,"honestSnaps":0,"cheaterSnaps":25,"cheaters":2,"banked":27,"caught":0,"satsKept":272,"rejectedMoves":25,"potNeverOverpaid":true}
+{"miners":200,"secs":151,"blocks":1,"peakBelow":200,"tickAvgMs":6.89,"tickMaxMs":13.2,"rssMB":130,"cpuPct":5,"kbPerMinerPerSec":3.8,"rttP50":0,"rttP95":5,"rttMax":10,"honestSnaps":0,"cheaterSnaps":160,"cheaters":10,"banked":68,"caught":197,"satsKept":241,"rejectedMoves":160,"potNeverOverpaid":true}
+
+miners  peak below  tick avg/max ms  server RSS  CPU  KB/s per miner  ping p50/p95/max ms  honest snaps  cheater snaps  banked  caught
+    10          10       0.14 / 3.8       59 MB    0%               2            0 / 1 / 3             0         0 of 0       0      30
+    50          50       0.47 / 3.3       63 MB    2%               3            0 / 1 / 3             0        25 of 2      27       0
+   200         200      6.89 / 13.2      130 MB    5%             3.8           0 / 5 / 10             0      160 of 10      68     197

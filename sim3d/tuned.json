@@ -1,0 +1,23 @@
+{
+ "amberRatio": [
+  20,
+  29,
+  59,
+  149,
+  159
+ ],
+ "vaultPieceShare": 0.1,
+ "salesTo": {
+  "pot": 0.8965,
+  "vault": 0.0035,
+  "counter": 0.1,
+  "studio": 0
+ },
+ "caughtTo": {
+  "pot": 0.872,
+  "vault": 0.028,
+  "studio": 0.1
+ },
+ "vaultFlow": 0.07,
+ "amberValueSpread": 0.8
+}
