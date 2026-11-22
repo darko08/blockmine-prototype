@@ -83,7 +83,7 @@
   #records td { padding: 5px 0; } #records td:last-child { text-align: right; color: #ffb547; }
   #records .btns { display: flex; gap: 8px; flex-wrap: wrap; }
   /* banked so far: lights up when a bag is banked at the hatch */
-  #vaultSats { color: #ffb547; } #netSats { font-size: .72em; color: #a89f8e; } #netSats.neg { color: #e0705a; } #netSats.pos { color: #8fd17a; }
+  #vaultSats { color: #ffb547; } #netSats { font-size: .72em; color: #a89f8e; } #vault.has { color: #ffb547; } #netSats.neg { color: #e0705a; } #netSats.pos { color: #8fd17a; }
   #bagSats.past { color: #ffd76a; text-shadow: 0 0 8px rgba(255,200,80,.8), 0 1px 2px #000; }
   .cell.flash .bar { animation: banked 1.6s ease-out; }
   /* amber chips flying into Net at the hatch: a rough glowing chunk */
@@ -107,6 +107,7 @@
     #riskCell { grid-column: 2; grid-row: 1; }
     #left { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; row-gap: 4px; margin-right: 46px; }
     #left .bar > span:last-child:not(:first-child) { display: none; }   /* "sats": the numbers say it */
+    #vaultCell #vault { display: block; font-size: 11px; }   /* this block's take stays visible on phones */
     #test { margin-right: 46px; }
     #clockCell { padding: 0 44px 0 0; justify-self: start; }
     #keys { font-size: 12px; padding: 4px 8px; margin-bottom: 6px; }
@@ -131,7 +132,7 @@
       <div id="left">
         <div class="cell"><div class="bar"><span>Oil</span><b id="oil">–</b></div><small id="lamps">no lamps</small></div>
         <div class="cell"><div class="bar"><span>Bag</span><b id="bagW">0/10</b><b id="bagSats">0</b><span>sats</span></div><small id="bag">no minerals</small></div>
-        <div class="cell" id="vaultCell"><div class="bar"><span>Kept</span><b id="vaultSats">0</b><b id="netSats" title="Net: kept minus what the kit, lamps and oil cost">0</b><span>sats</span></div><small id="vault">net, after 0 spent</small></div>
+        <div class="cell" id="vaultCell"><div class="bar"><span>Kept</span><b id="vaultSats">0</b><b id="netSats" title="Net: kept minus what the kit, lamps and oil cost">0</b><span>sats</span></div><small id="vault">this block: nothing carried out yet</small></div>
       </div>
       <div class="cell" id="clockCell">
         <div class="bar"><span>Block</span><b id="blockNum">–</b><span>Open</span><b id="blockOpen">0:00</b></div>
@@ -202,6 +203,6 @@
 <script src="rules3d.js?v=4"></script>
 <script src="mine3d.js?v=3"></script>
 <script src="economy3d.js?v=2"></script>
-<script type="module" src="game3d.js?v=47"></script>
+<script type="module" src="game3d.js?v=48"></script>
 </body>
 </html>
