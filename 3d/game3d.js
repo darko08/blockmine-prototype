@@ -1221,6 +1221,12 @@ class Game {
     if (this.terrainAt(this.lvl, ahead, 'gap') || this.terrainAt(this.lvl, ahead, 'rubble')) return { dir, jump: true };
     return { dir };
   }
+  addBlockKept(kept) {
+    const r = records.get(), h = this.blockInfo && this.blockInfo.height;
+    if (r.blockH !== h) { r.blockH = h; r.blockKept = 0; r.blockShifts = 0; }
+    r.blockKept += kept; r.blockShifts += 1; records.save();
+  }
+  blockKept() { const r = records.get(); return this.blockInfo && r.blockH === this.blockInfo.height ? { kept: r.blockKept || 0, shifts: r.blockShifts || 0 } : { kept: 0, shifts: 0 }; }
   coinCount(n) { return n.kind === 'vault' || n.rich ? 40 : Math.max(5, Math.min(30, Math.round(2 + Math.log2(1 + (n.value || 0)) * 2.2))); }
   startMining(n) {
     if (this.bagWeight() + n.weight > RULES.bagCapacity + 1e-9) { this.say('Your bag is full. Drop ore or go up.', 2.5); return; }
@@ -1283,6 +1289,7 @@ class Game {
     const kept = this.inShift ? this.eco.carriedOut(sats, pieceValue) : 0;
     if (this.inShift) {
       this.purse.points += kept;
+      this.addBlockKept(kept);
       r.totalPoints += kept; r.minerals = r.minerals || {};
       for (const k in mins) r.minerals[k] = (r.minerals[k] || 0) + mins[k];
       if (vaultPiece) r.vaultPieces = (r.vaultPieces || 0) + 1;
@@ -1667,7 +1674,9 @@ class Game {
       this.set('vaultSats', fmt(kept));
       this.set('netSats', (net > 0 ? '+' : net < 0 ? '\u2212' : '\u00b1') + fmt(Math.abs(net)));
       if (Math.sign(net) !== this.last.netSign) { this.last.netSign = Math.sign(net); $('netSats').classList.toggle('neg', net < 0); $('netSats').classList.toggle('pos', net > 0); }
-      this.set('vault', 'net, after ' + fmt(kept - net) + ' spent on the kit, lamps and oil');
+      const bk = this.blockKept();   // this block so far: what was carried out since its hatch opened
+      this.set('vault', 'this block: ' + (bk.shifts ? '+' + fmt(bk.kept) + (bk.shifts > 1 ? ' in ' + bk.shifts + ' trips' : '') : 'nothing carried out yet'));
+      if (!!bk.kept !== this.last.blockHas) { this.last.blockHas = !!bk.kept; $('vault').classList.toggle('has', !!bk.kept); }
     }
     const r = records.get(), firstShift = r.shifts < S.keysHintShifts || (r.shifts === S.keysHintShifts && this.inShift);
     $('keys').style.display = firstShift ? '' : 'none';
@@ -1751,6 +1760,7 @@ class Net {
       case 'snap': this.snap(m.place); break;
       case 'banked': {
         g.purse = Purse(RULES, m.purse); g.inShift = false; g.lampLit = false; g.oilLeft = 0;
+        g.addBlockKept(m.kept);
         const r = records.get(); r.totalPoints += m.kept; r.survived = (r.survived || 0) + 1; if (m.piece) r.vaultPieces = (r.vaultPieces || 0) + 1;
         r.best = Math.max(r.best || 0, m.kept - (g.shiftCost || 0)); records.save();
         if (m.kept) g.coinsToNet(Math.min(24, 4 + Math.round(Math.log2(1 + m.kept) * 2)));
