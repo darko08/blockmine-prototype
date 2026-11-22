@@ -206,7 +206,8 @@ class Game {
     this.bindHud();
     if (TOUCH && innerHeight > innerWidth) { let seen = false; try { seen = localStorage.getItem('blockmine3d.turnHint') === '1'; localStorage.setItem('blockmine3d.turnHint', '1'); } catch (e) {} if (!seen) setTimeout(() => this.say('Tip: turn your phone sideways for a wider view of the mine.', 5), 4000); }
     this.prev = performance.now();
-    this.renderer.setAnimationLoop((t) => this.frame(t));
+    // one bad frame must never stop the game: report it and carry on with the next
+    this.renderer.setAnimationLoop((t) => { try { this.frame(t); } catch (e) { if (!this.frameErrors) console.error(e); this.frameErrors = (this.frameErrors || 0) + 1; this.prev = performance.now(); } });
     if (ONLINE) this.net = new Net(this, ONLINE); else startChain(TEST, (b) => this.onBlock(b), (s) => this.onStatus(s));
     $('loading').style.display = 'none';
   }
@@ -714,7 +715,7 @@ class Game {
     const cf = this.climbFactor(), onLadder = this.mode === 'ladder';
     const k = this.keys, manual = k.left || k.right || k.up || k.down || this.pad.left || this.pad.right || press.jump;
     if (manual && this.goal) { this.goal = null; this.markGoal(); }
-    const ap = manual ? null : this.autopilot() || {};
+    const ap = (manual ? null : this.autopilot()) || {};   // a key or pad takes over from tap-to-go
     const left = k.left || (!onLadder && this.pad.left) || ap.dir < 0, right = k.right || (!onLadder && this.pad.right) || ap.dir > 0;
     const up = k.up || (onLadder && this.pad.left) || !!ap.up, down = k.down || (onLadder && this.pad.right) || !!ap.down;
     if (ap.jump) press.jump = true;
