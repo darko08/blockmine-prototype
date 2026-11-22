@@ -38,7 +38,8 @@ const V = {
   timberEvery: 5.5 * T,      // spacing of timber sets along a tunnel (zones 1-3)
   pickScale: 0.42,           // pickaxe length as a share of his height
   amberEmissive: [0.35, 0.55, 0.8, 1.1],    // amber (the sats) glows more the deeper it lies
-  vaultMonHeight: 120, vaultMonZ: -850, vaultMonSide: 0.5, vaultHalf: 15000,   // the chamber's height; the heap is half full at vaultHalf sats
+  vaultMonHeight: 120, vaultMonZ: -880, vaultMonSide: 0.5, vaultHalf: 15000,
+  vaultPaintWidth: 2200, vaultPaintFloor: 0.9, vaultPaintTop: 0.1, vaultPaintX: 0, vaultScale: 20000,   // the painted Vault: share of the view's width, gap under the top bar   // the painted Vault: its width, where its floor meets the ground, how it fills
   vaultMonUnused: 0,   // the Great Vault on the surface: its height, its depth (just before the sky), how far left in the view
   ghostMiners: 100, ghostSeed: 15000,                      // practice: a simulated crowd this size; the Vault starts where it keeps it
   ghostTricklePerBlock: 410, ghostKnockPerBlock: 190, ghostPiecesPerBlock: 0.49,   // its flows, from the simulator's projection
@@ -592,173 +593,163 @@ class Game {
       }, delay);
     }
   }
-  // ---------- the Great Vault, out on the surface in the background: a strongroom filling with amber as it grows ----------
-  // A stone chamber, open at the front behind an iron grille, holds a heap of glowing amber nuggets and the lamps of the
-  // fallen. The heap is as big as the Vault: it rises fast at first and more slowly as it fills. Amber rises from the shaft
-  // to an iron chute and drops nuggets onto the heap: a trickle from lamp sales and dropped amber, a surge at every knock.
-  // When a piece is carried out, a chunk is pulled off the top and the heap sinks.
+  // ---------- the Great Vault, painted, behind the hatch: it fills as the Vault grows, and the amber pours in live ----------
+  // Three paintings of the same vault (a small pile, a mountain, an overflowing hoard) fade into one another with the
+  // Vault's size. Over them, live: the molten stream from the shaft onto the peak, sparks where it lands, gold glinting
+  // on the heap, flickering braziers and rising embers. Amber rises from the hatch to the shaft; at the knock the stream
+  // becomes a torrent; when a piece is carried out the vault flashes and treasure rises out through the shaft.
   buildVaultShow() {
-    const g = this.vaultMon = new THREE.Group(), H = V.vaultMonHeight, W = H * 1.4, Dp = H * 0.42, r = seededRandom('vault-chamber');
-    this.vaultDims = { W, H, Dp };
-    const stoneTex = this.A.rock && this.A.rock[3];
-    const stone = new THREE.MeshStandardMaterial({ map: stoneTex || null, color: 0x8a7e72, roughness: 0.9, emissive: 0x3a2a1c, emissiveMap: stoneTex || null, emissiveIntensity: 0.9 });   // faintly lit by its own treasure
-    const dark = new THREE.MeshStandardMaterial({ map: stoneTex || null, color: 0x4a4038, roughness: 0.95, emissive: 0x2a1608, emissiveMap: stoneTex || null, emissiveIntensity: 0.8 });
-    const iron = new THREE.MeshStandardMaterial({ color: 0x6a6058, roughness: 0.4, metalness: 0.7, emissive: 0x24160c });
-    const box = (w, h, d, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); g.add(m); return m; };
-    // floor, back wall, side pillars, the lintel and its keystone
-    box(W + 40, 8, Dp + 16, stone, 0, -4, 0);
-    box(W, H, 8, dark, 0, H / 2, -Dp / 2 - 4);
-    for (const s of [-1, 1]) { box(22, H + 4, Dp + 16, stone, s * (W / 2 + 11), H / 2, 0); box(30, 10, Dp + 22, stone, s * (W / 2 + 11), 5, 0); }
-    box(W + 64, 26, Dp + 20, stone, 0, H + 13, 0);
-    box(30, 34, Dp + 24, stone, 0, H + 18, 0);
-    // the grille across the front: iron bars, two cross bars and a frame
-    const bars = Math.round(W / 22);
-    for (let i = 0; i <= bars; i++) {
-      const b = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, H, 6), iron); b.position.set(-W / 2 + (i * W) / bars, H / 2, Dp / 2 + 2); g.add(b);
-    }
-    for (const y of [H * 0.34, H * 0.68]) { const b = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, W, 6), iron); b.rotation.z = Math.PI / 2; b.position.set(0, y, Dp / 2 + 3); g.add(b); }
-    // the chute: from above and right, towards the shaft, down into the chamber
-    const c0 = new THREE.Vector3(W * 0.5 + 70, H + 95, 0), c1 = new THREE.Vector3(W * 0.12, H - 14, 0), dir = c1.clone().sub(c0), len = dir.length();
-    const chute = new THREE.Mesh(new THREE.CylinderGeometry(9, 11, len, 10, 1, true), iron);
-    chute.position.copy(c0).add(c1).multiplyScalar(0.5); chute.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize()); g.add(chute);
-    const hopper = new THREE.Mesh(new THREE.CylinderGeometry(18, 9, 18, 10, 1, true), iron); hopper.position.copy(c0).add(dir.clone().normalize().multiplyScalar(-6)); hopper.quaternion.copy(chute.quaternion); g.add(hopper);
-    this.chuteTop = c0.clone().add(new THREE.Vector3(0, 12, 0)); this.chuteEnd = c1.clone();
-    // the light of the treasure, inside: brighter as the heap grows
-    this.vaultMonLight = new THREE.PointLight(0xff9040, 0, W * 1.6, 1.3); this.vaultMonLight.position.set(0, H * 0.35, Dp * 0.15); g.add(this.vaultMonLight);
-    this.vaultMonGlow = this.glowSprite(0xff8a30, W * 1.4, 0.18); this.vaultMonGlow.position.set(0, H * 0.3, -Dp * 0.3); g.add(this.vaultMonGlow);
-    // the heap: nugget slots worked out once by dropping them on a height map, so it grows from the floor up into a mound
-    const N = this.pileMax = 560, nug = this.coinMesh.geometry;
-    const cell = 5, nx = Math.ceil((W - 16) / cell), nz = Math.ceil((Dp - 16) / cell), hm = new Float32Array(nx * nz);
-    const gauss = () => { let s = 0; for (let k = 0; k < 4; k++) s += r(); return (s - 2) / 2; };
-    this.pileSlots = [];
-    for (let i = 0; i < N; i++) {
-      const sc = 1.3 + r() * 1.1, rad = 3.4 * sc;
-      const x = Math.max(-W / 2 + 10, Math.min(W / 2 - 10, gauss() * W * 0.55)), z = -Dp / 2 + 8 + r() * (Dp - 18);
-      const ci = Math.min(nx - 1, Math.max(0, Math.floor((x + W / 2 - 8) / cell))), cj = Math.min(nz - 1, Math.max(0, Math.floor((z + Dp / 2 - 8) / cell)));
-      const span = Math.ceil(rad / cell);
-      let top = 0;
-      for (let a = -span; a <= span; a++) for (let b = -span; b <= span; b++) { const ii = ci + a, jj = cj + b; if (ii >= 0 && ii < nx && jj >= 0 && jj < nz) top = Math.max(top, hm[ii * nz + jj]); }
-      const y = top + rad * 0.55;
-      for (let a = -span; a <= span; a++) for (let b = -span; b <= span; b++) { const ii = ci + a, jj = cj + b; if (ii >= 0 && ii < nx && jj >= 0 && jj < nz) hm[ii * nz + jj] = Math.max(hm[ii * nz + jj], y + rad * 0.45 * (1 - (Math.abs(a) + Math.abs(b)) / (2 * span + 1))); }
-      this.pileSlots.push({ x, y: Math.min(y, H - 12), z, sc, rx: r() * 6, ry: r() * 6, heat: 0.75 + r() * 0.5 });
-    }
-    const pm = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
-    this.pile = new THREE.InstancedMesh(nug, pm, N); this.pile.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
-    const d = new THREE.Object3D(), col = new THREE.Color();
-    this.pileSlots.forEach((s, i) => {
-      d.position.set(s.x, s.y, s.z); d.rotation.set(s.rx, s.ry, 0); d.scale.setScalar(s.sc); d.updateMatrix(); this.pile.setMatrixAt(i, d.matrix);
-      col.setRGB(1.4 * s.heat, 0.55 * s.heat, 0.1 * s.heat); this.pile.setColorAt(i, col);
+    const g = this.vaultMon = new THREE.Group(), Wp = V.vaultPaintWidth, Hp = Wp * 1143 / 2048;
+    this.vaultDims = { Wp, Hp };
+    const loader = new THREE.TextureLoader(), tex = [1, 2, 3].map((i) => { const t = loader.load('vault/stage' + i + '.webp?v=1'); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; });
+    this.vaultPaintMat = new THREE.ShaderMaterial({
+      uniforms: { a: { value: tex[0] }, b: { value: tex[1] }, c: { value: tex[2] }, fill: { value: 1 }, boost: { value: 0 }, t: { value: 0 } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: `varying vec2 vUv; uniform sampler2D a; uniform sampler2D b; uniform sampler2D c; uniform float fill; uniform float boost; uniform float t;
+        void main(){
+          vec3 col = mix(texture2D(a, vUv).rgb, texture2D(b, vUv).rgb, clamp(fill, 0.0, 1.0));
+          col = mix(col, texture2D(c, vUv).rgb, clamp(fill - 1.0, 0.0, 1.0));
+          float warm = dot(col, vec3(0.6, 0.35, 0.05));   // the gold breathes a little, and flares at the knock or a piece
+          col *= 1.0 + boost * 0.9 * smoothstep(0.35, 0.9, warm) + 0.04 * sin(t * 1.7) * smoothstep(0.5, 0.95, warm);
+          float edge = smoothstep(0.0, 0.2, vUv.x) * smoothstep(0.0, 0.2, 1.0 - vUv.x) * smoothstep(0.0, 0.04, vUv.y) * smoothstep(0.0, 0.12, 1.0 - vUv.y);
+          gl_FragColor = vec4(col, edge);   // fades out at the edges, so it sits in the night
+        }`,
     });
-    this.pile.count = 0; this.pile.frustumCulled = false; g.add(this.pile);
-    // the treasure in the heap: the lamps of the fallen, showing as the heap reaches them
-    this.pileTreasure = [];
-    if (this.A.models.lantern) for (const at of [50, 140, 230, 320, 410, 500]) {
-      const s = this.pileSlots[at], l = place(this.A.models.lantern, H * 0.1, { cast: false });
-      l.position.set(s.x, s.y + 2, s.z); l.rotation.set((r() - 0.5) * 2, r() * 6, (r() - 0.5) * 2); l.visible = false; g.add(l); this.pileTreasure.push({ at, o: l });
-    }
-    // nuggets falling from the chute onto the heap
-    this.pileFall = { mesh: new THREE.InstancedMesh(nug, pm, 60), list: [] }; this.pileFall.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(60 * 3), 3);
-    this.pileFall.mesh.count = 0; this.pileFall.mesh.frustumCulled = false; g.add(this.pileFall.mesh);
-    // the sign above it: what it holds and what a piece is worth
+    this.vaultPaintMat.toneMapped = false; this.vaultPaintMat.transparent = true; this.vaultPaintMat.depthWrite = false;
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(Wp, Hp), this.vaultPaintMat); g.add(plane);
+    // painting coordinates (u across, v down) to the group's own coordinates
+    this.paintAt = (u, v, z = 2) => new THREE.Vector3((u - 0.5) * Wp, (0.5 - v) * Hp, z);
+    // the live stream: a tube from the shaft to the peak, its glow running down it
+    this.vaultStreamMat = new THREE.ShaderMaterial({
+      uniforms: { t: { value: 0 }, power: { value: 0.3 } }, transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending,
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: `varying vec2 vUv; uniform float t; uniform float power;
+        float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+        float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h(i), h(i+vec2(1,0)), f.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), f.x), f.y); }
+        void main(){ float flow = n(vec2(vUv.x*22.0 - t*7.0, vUv.y*5.0)) * 0.6 + n(vec2(vUv.x*50.0 - t*13.0, vUv.y*9.0)) * 0.4;
+          vec3 col = mix(vec3(1.0,0.35,0.05), vec3(1.0,0.85,0.45), smoothstep(0.4,0.9,flow)) * (0.7 + power * 0.9);
+          gl_FragColor = vec4(col, (0.45 + 0.55*flow) * clamp(0.4 + power, 0.0, 1.0)); }`,
+    });
+    this.vaultStream = new THREE.Mesh(new THREE.BufferGeometry(), this.vaultStreamMat); g.add(this.vaultStream);
+    // sparks at the peak, embers rising, glints on the heap
+    const SP = 220, sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(SP * 3), 3)); sg.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(SP * 3), 3));
+    this.vSparks = { pts: new THREE.Points(sg, new THREE.PointsMaterial({ size: Wp * 0.006, vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, toneMapped: false })), list: [], N: SP };
+    this.vSparks.pts.frustumCulled = false; g.add(this.vSparks.pts);
+    this.vGlints = [];
+    for (let i = 0; i < 16; i++) { const s = this.glowSprite(0xfff0b0, Wp * 0.03, 0); s.material.toneMapped = false; g.add(s); this.vGlints.push({ s, t: Math.random() * 4, u: 0, v: 0 }); }
+    this.vBraziers = [[0.207, 0.545], [0.93, 0.585]].map(([u, v]) => { const s = this.glowSprite(0xff8a30, Wp * 0.09, 0.4); s.position.copy(this.paintAt(u, v, 3)); g.add(s); return s; });
+    // the count, high in the vault's dark
     const c = document.createElement('canvas'); c.width = 640; c.height = 300;
     this.vaultSign = { c, ctx: c.getContext('2d'), tex: new THREE.CanvasTexture(c), shown: -1, at: 0 };
     this.vaultSign.tex.colorSpace = THREE.SRGBColorSpace;
     const sign = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.vaultSign.tex, transparent: true, depthWrite: false, toneMapped: false }));
-    sign.scale.set(W * 1.45, W * 1.45 * 300 / 640, 1); sign.position.set(-W * 0.1, H + 30 + W * 1.45 * 300 / 640 * 0.4, 0); g.add(sign);
-    // the motes that carry amber from the shaft to the chute, and out again
+    sign.scale.set(Wp * 0.3, Wp * 0.3 * 300 / 640, 1); sign.position.copy(this.paintAt(0.24, 0.27, 4)); g.add(sign); this.vaultSignSprite = sign;
+    // the motes that carry amber from the hatch to the shaft, and out again
     const MN = 260, pg = new THREE.BufferGeometry();
     pg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(MN * 3), 3));
     pg.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(MN * 3), 3));
     this.motes = { pts: new THREE.Points(pg, new THREE.PointsMaterial({ size: 9, vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, toneMapped: false })), list: [], N: MN };
     this.motes.pts.frustumCulled = false; this.scene.add(this.motes.pts);
-    this.vs = { shown: null, carry: 0, flash: 0, k: 0 };
+    this.vs = { shown: null, carry: 0, flash: 0, surge: 0, streamPeak: -1, streamR: -1 };
     this.scene.add(g);
   }
-  placeVaultShow() {   // far back on the surface, to the left of where he waits, wherever the screen shape puts that
-    if (!this.vaultMon || !this.mine || !this.camDist) return;
-    const halfW0 = this.camDist * Math.tan(THREE.MathUtils.degToRad(V.fov / 2)) * this.camera.aspect;
-    const halfW = halfW0 * (this.camDist - V.vaultMonZ) / this.camDist, waitX = this.mine.G.colX(this.mine.c0) - S.waitOffset * T;
-    this.vaultMon.position.set(waitX - halfW * V.vaultMonSide, -V.vaultMonHeight * 0.12, V.vaultMonZ);
+  placeVaultShow() { if (this.vaultMon && this.mine && this.camDist) this.fitVault(); }
+  // fit the painting between the top bar and the ground line, as seen from where the camera is now: the vault's floor
+  // (v = vaultPaintFloor) sits on the horizon, its top just under the top bar; on a narrow screen its sides are cropped
+  fitVault() {
+    const { Hp } = this.vaultDims, cam = this.camera, depth = this.camDist - V.vaultMonZ, tan = Math.tan(THREE.MathUtils.degToRad(V.fov / 2));
+    const camY = cam.position.y || 0, top = camY + depth * tan * (1 - 2 * V.vaultPaintTop), ground = camY + (0 - camY) * depth / this.camDist;
+    const h = Math.max(50, (top - ground) / V.vaultPaintFloor), k = h / Hp;
+    this.vaultMon.scale.setScalar(k);
+    this.vaultMon.position.set(this.mine.G.colX(this.mine.c0) - S.waitOffset * T + V.vaultPaintX, top - h / 2, V.vaultMonZ);
+    // the count stays in the part of the painting that is on screen, left of the stream, shrinking on a narrow screen
+    const { Wp } = this.vaultDims, halfU = Math.min(0.5, (depth * tan * cam.aspect) / (Wp * k)), w = Math.min(0.3, halfU * 0.9);
+    const su = Math.max(0.24, 0.5 - halfU + w / 2 + 0.01);
+    this.vaultSignSprite.scale.set(Wp * w, Wp * w * 300 / 640, 1); this.vaultSignSprite.position.copy(this.paintAt(su, 0.27, 4));
   }
   vaultTruth() { return Math.max(0, Math.floor(this.eco ? this.eco.vault : 0)); }
-  pileCount(v) { return Math.round(this.pileMax * v / (v + V.vaultHalf)); }   // half full at vaultHalf sats, never quite full
-  toWorld(p) { return this.vaultMon.localToWorld(p.clone()); }
-  // amber flows: 'in' (a trickle), 'knock' (the caught bags, at the knock) or 'out' (a piece carried out)
+  vaultFill(v) { return 2 * (1 - Math.exp(-v / V.vaultScale)); }   // 0 = empty, 1 = the mountain, 2 = overflowing (never quite)
+  vaultPeak(f) { return f < 1 ? 0.64 + (0.46 - 0.64) * f : 0.46 + (0.465 - 0.46) * (f - 1); }   // where the stream lands, in the painting
   vaultFlow(kind, amount, who) {
     if (!this.vaultMon || !(amount > 0)) return;
     this.vaultMon.updateMatrixWorld(true);
-    const hx = this.mine ? this.mine.G.colX(this.mine.c0) : this.vaultMon.position.x, shaft = new THREE.Vector3(hx, 8, 0), top = this.toWorld(this.chuteTop);
-    if (kind === 'out') {   // a chunk pulled off the top of the heap, flying out to the shaft
-      const k = this.vs.k, take = Math.max(6, k - this.pileCount(Math.max(0, (this.vs.shown == null ? this.vaultTruth() : this.vs.shown) - amount)));
-      for (let i = Math.max(0, k - take); i < k; i++) this.mote(this.toWorld(new THREE.Vector3(this.pileSlots[i].x, this.pileSlots[i].y, this.pileSlots[i].z)), shaft, 0, 1.2 + Math.random() * 0.8, 0xfff0b0);
+    const hx = this.mine ? this.mine.G.colX(this.mine.c0) : this.vaultMon.position.x, hatch = new THREE.Vector3(hx, 8, 0);
+    const shaft = this.vaultMon.localToWorld(this.paintAt(0.516, 0.03, 6));
+    if (kind === 'out') {   // treasure rises out of the heap and up through the shaft
+      const peak = this.vaultMon.localToWorld(this.paintAt(0.516, this.vaultPeak(this.vaultFill(this.vs.shown || 0)), 6));
+      for (let i = 0; i < 40; i++) this.mote(peak.clone().add(new THREE.Vector3((Math.random() - 0.5) * 160, Math.random() * 40, 0)), shaft, 0, 1 + Math.random() * 0.8, 0xfff0b0, i * 0.02);
       this.vs.shown = Math.max(0, (this.vs.shown == null ? this.vaultTruth() : this.vs.shown) - amount); this.vs.flash = 1;
-      const p = this.screen(this.vaultMon.position.x, -(this.vaultMon.position.y + V.vaultMonHeight * 0.6), this.vaultMon.position.z);
-      if (p.x > 0 && p.x < innerWidth && p.y > 0 && p.y < innerHeight) this.floatAt(p.x, p.y, '−' + fmt(amount) + ' · a Vault piece carried out' + (who ? ' by ' + who : ''));
+      const sp = this.screen(peak.x, -peak.y, peak.z);
+      if (sp.x > 0 && sp.x < innerWidth && sp.y > 0 && sp.y < innerHeight) this.floatAt(sp.x, sp.y, '−' + fmt(amount) + ' · a Vault piece carried out' + (who ? ' by ' + who : ''));
       if (!this.below()) this.say((who || 'A miner') + ' carried out a Vault piece: ' + fmt(amount) + ' sats.', 3.5);
       this.clink(4, true);
       return;
     }
     const n = kind === 'knock' ? Math.min(60, 12 + Math.round(Math.log2(1 + amount) * 4)) : 1;
-    for (let i = 0; i < n; i++) {
-      const from = shaft.clone().add(new THREE.Vector3((Math.random() - 0.5) * 30, Math.random() * 10, 0));
-      this.mote(from, top, amount / n, (kind === 'knock' ? 1.5 : 2.1) + Math.random() * 0.8, kind === 'knock' ? 0xff7a20 : 0xffa040, kind === 'knock' ? i * 0.04 : 0, true);
-    }
-    if (kind === 'knock' && !this.below()) this.say('The knock: ' + fmt(amount) + ' sats from the caught pour into the Vault.', 3);
+    for (let i = 0; i < n; i++) this.mote(hatch.clone().add(new THREE.Vector3((Math.random() - 0.5) * 30, Math.random() * 10, 0)), shaft, amount / n, (kind === 'knock' ? 1.4 : 2) + Math.random() * 0.7, kind === 'knock' ? 0xff7a20 : 0xffa040, kind === 'knock' ? i * 0.035 : 0);
+    if (kind === 'knock') { this.vs.surge = 4; if (!this.below()) this.say('The knock: ' + fmt(amount) + ' sats from the caught pour into the Vault.', 3); }
   }
-  mote(from, to, carry, dur, color, delay = 0, drop = false) {
+  mote(from, to, carry, dur, color, delay = 0) {
     const M = this.motes; if (M.list.length >= M.N) { this.vs.carry += carry; return; }
-    const mid = from.clone().lerp(to, 0.5); mid.y += V.vaultMonHeight * (0.5 + Math.random() * 0.4); mid.x += (Math.random() - 0.5) * 120;
-    M.list.push({ from, mid, to, t: -delay, dur, carry, drop, c: new THREE.Color(color) });
+    const mid = from.clone().lerp(to, 0.5); mid.y += 260 + Math.random() * 180; mid.x += (Math.random() - 0.5) * 160;
+    M.list.push({ from, mid, to, t: -delay, dur, carry, c: new THREE.Color(color) });
   }
-  // a nugget out of the chute, tumbling onto the next place on the heap; its sats count when it lands
-  dropNugget(carry) {
-    const F = this.pileFall; if (F.list.length >= 60) { this.vs.shown += carry; return; }
-    const slot = this.pileSlots[Math.min(this.pileMax - 1, this.vs.k)];
-    F.list.push({ from: this.chuteEnd.clone(), to: new THREE.Vector3(slot.x, slot.y, slot.z), t: 0, dur: 0.5 + Math.random() * 0.2, carry, rx: Math.random() * 6, ry: Math.random() * 6, sc: slot.sc });
+  vSpark(p, speed, up = 1) {
+    const L = this.vSparks.list; if (L.length >= this.vSparks.N) return;
+    const a = Math.random() * Math.PI; L.push({ p: p.clone(), v: new THREE.Vector3(Math.cos(a) * speed, (0.3 + Math.random()) * speed * up, 0), life: 0.35 + Math.random() * 0.5 });
   }
   vaultShowStep(dt) {
     if (!this.vaultMon) return;
     const M = this.motes, pos = M.pts.geometry.attributes.position, colA = M.pts.geometry.attributes.color, a = new THREE.Vector3(), b = new THREE.Vector3();
     let k = 0;
     if (this.vs.shown == null) this.vs.shown = this.vaultTruth();
+    let arrived = 0;
     M.list = M.list.filter((q) => {
       q.t += dt; if (q.t < 0) return true;
       const f = Math.min(1, q.t / q.dur), e = f * f * (3 - 2 * f);
-      a.copy(q.from).lerp(q.mid, e); b.copy(q.mid).lerp(q.to, e); a.lerp(b, e);   // a rising arc
-      if (f >= 1) { if (q.drop) this.dropNugget(q.carry); else this.vs.shown += q.carry; return false; }
+      a.copy(q.from).lerp(q.mid, e); b.copy(q.mid).lerp(q.to, e); a.lerp(b, e);
+      if (f >= 1) { this.vs.shown += q.carry; if (q.carry) arrived++; return false; }
       pos.setXYZ(k, a.x, a.y, a.z); const glow = 0.6 + 0.4 * Math.sin(f * Math.PI); colA.setXYZ(k, q.c.r * glow, q.c.g * glow, q.c.b * glow); k++;
       return true;
     });
     for (let i = k; i < M.N; i++) pos.setXYZ(i, 0, -1e5, 0);
     pos.needsUpdate = true; colA.needsUpdate = true; M.pts.geometry.setDrawRange(0, k);
-    // falling nuggets: out of the chute, an arc down onto the heap
-    const F = this.pileFall, dd = new THREE.Object3D(), col = new THREE.Color();
-    let fk = 0;
-    F.list = F.list.filter((q) => {
-      q.t += dt; const f = Math.min(1, q.t / q.dur);
-      if (f >= 1) { this.vs.shown += q.carry; this.vs.flash = Math.min(1, this.vs.flash + 0.06); if (Math.random() < 0.25) this.clink(1); return false; }
-      dd.position.copy(q.from).lerp(q.to, f); dd.position.y += Math.sin(f * Math.PI) * 8 - f * f * 4;
-      dd.rotation.set(q.rx + f * 6, q.ry + f * 4, 0); dd.scale.setScalar(q.sc); dd.updateMatrix(); F.mesh.setMatrixAt(fk, dd.matrix);
-      col.setRGB(1.7, 0.66, 0.12); F.mesh.setColorAt(fk, col); fk++;
-      return true;
-    });
-    F.mesh.count = fk; F.mesh.instanceMatrix.needsUpdate = true; if (fk) F.mesh.instanceColor.needsUpdate = true;
-    // the count: it rises as nuggets land, and drifts to the true amount when nothing is on its way
     if (this.vs.carry) { this.vs.shown += this.vs.carry; this.vs.carry = 0; }
     const truth = this.vaultTruth();
-    if (!M.list.length && !F.list.length) this.vs.shown += (truth - this.vs.shown) * Math.min(1, dt * 0.8);
-    // the heap: as many nuggets as the amount fills; a few glint now and then
-    const want = this.pileCount(Math.max(0, this.vs.shown));
-    if (want !== this.vs.k) { this.vs.k = want; this.pile.count = want; for (const t of this.pileTreasure) t.o.visible = want > t.at; }
-    if (want && Math.random() < dt * 6) {
-      const i = Math.floor(Math.random() * want), s = this.pileSlots[i]; col.setRGB(2.4, 1.3, 0.4); this.pile.setColorAt(i, col); this.pile.instanceColor.needsUpdate = true;
-      setTimeout(() => { col.setRGB(1.4 * s.heat, 0.55 * s.heat, 0.1 * s.heat); this.pile.setColorAt(i, col); this.pile.instanceColor.needsUpdate = true; }, 160);
+    if (!M.list.length) this.vs.shown += (truth - this.vs.shown) * Math.min(1, dt * 0.8);
+    // the painting: which stage, how bright
+    const fill = this.vaultFill(Math.max(0, this.vs.shown)), visible = !this.below() || this.my < 200;
+    if (!this.below()) this.fitVault();   // the camera settles after the first frames; keep it framed while he is up top
+    this.vs.flash = Math.max(0, this.vs.flash - dt * 1.2); this.vs.surge = Math.max(0, this.vs.surge - dt);
+    const U = this.vaultPaintMat.uniforms; U.fill.value = fill; U.t.value = this.clock; U.boost.value = this.vs.flash + Math.min(1, this.vs.surge) * 0.3 + Math.min(0.3, arrived * 0.08);
+    // the live stream: thin for the trickle, a torrent at the knock
+    const power = Math.min(1, 0.3 + this.vs.surge * 0.25), peakV = this.vaultPeak(fill), r = this.vaultDims.Wp * (0.0035 + power * 0.006);
+    this.vaultStreamMat.uniforms.t.value = this.clock; this.vaultStreamMat.uniforms.power.value = power;
+    if (Math.abs(peakV - this.vs.streamPeak) > 0.004 || Math.abs(r - this.vs.streamR) > this.vaultDims.Wp * 0.001) {
+      const top = this.paintAt(0.516, 0.0, 5), end = this.paintAt(0.516, peakV, 5);
+      const curve = new THREE.CatmullRomCurve3([top, top.clone().lerp(end, 0.5).add(new THREE.Vector3(2, 0, 0)), end]);
+      this.vaultStream.geometry.dispose(); this.vaultStream.geometry = new THREE.TubeGeometry(curve, 32, r, 8, false);
+      this.vs.streamPeak = peakV; this.vs.streamR = r;
     }
-    // the light of the treasure: brighter as it grows, and when amber lands or a piece is taken
-    this.vs.flash = Math.max(0, this.vs.flash - dt * 1.5);
-    const fill = want / this.pileMax, t = this.clock * 1.3;
-    this.vaultMonLight.intensity = ((3 + 14 * fill) * (1 + 0.08 * Math.sin(t)) + 14 * this.vs.flash) * (this.below() ? 0 : 1);
-    this.vaultMonGlow.material.opacity = 0.08 + 0.2 * fill + 0.2 * this.vs.flash;
+    // sparks where it lands; embers rising off the heap
+    if (visible) {
+      const peak = this.paintAt(0.516, peakV, 6);
+      for (let i = 0; i < (this.vs.surge ? 5 : 1); i++) if (Math.random() < 0.7) this.vSpark(peak, 70 + power * 120);
+      if (Math.random() < dt * 6) this.vSpark(this.paintAt(0.3 + Math.random() * 0.45, peakV + 0.05 + Math.random() * 0.2, 6), 20, 1.6);
+    }
+    const SL = this.vSparks, sp = SL.pts.geometry.attributes.position, sc = SL.pts.geometry.attributes.color;
+    SL.list = SL.list.filter((s) => { s.v.y -= 260 * dt; s.p.addScaledVector(s.v, dt); s.life -= dt; return s.life > 0; });
+    SL.list.forEach((s, i) => { sp.setXYZ(i, s.p.x, s.p.y, s.p.z); const q = Math.min(1, s.life * 2); sc.setXYZ(i, 1.6 * q, 0.8 * q, 0.25 * q); });
+    SL.pts.geometry.setDrawRange(0, SL.list.length); sp.needsUpdate = true; sc.needsUpdate = true;
+    // gold glinting across the heap; the braziers flicker
+    const spread = fill < 1 ? 0.12 + 0.28 * fill : 0.4 + 0.08 * (fill - 1);
+    for (const gl of this.vGlints) {
+      gl.t -= dt;
+      if (gl.t <= 0) { gl.t = 0.6 + Math.random() * 2.5; gl.u = 0.516 + (Math.random() - 0.5) * 2 * spread; gl.v = peakV + 0.04 + Math.random() * (0.3 * Math.min(1, fill) + 0.05); gl.s.position.copy(this.paintAt(gl.u, gl.v, 5)); }
+      const life = Math.max(0, 1 - Math.abs(gl.t - 0.3) / 0.3); gl.s.material.opacity = visible ? life * 0.85 : 0;
+    }
+    this.vBraziers.forEach((s, i) => { s.material.opacity = 0.25 + 0.12 * Math.sin(this.clock * (7 + i * 2.3)) + 0.08 * Math.sin(this.clock * 13.1 + i); });
     this.drawVaultSign();
   }
   drawVaultSign() {
