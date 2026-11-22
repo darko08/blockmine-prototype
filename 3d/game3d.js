@@ -627,24 +627,15 @@ class Game {
     this.porterPath = [[0.64, 0.83], [0.56, 0.8], [0.484, 0.781], [0.3225, 0.586], [0.404, 0.505], [0.286, 0.391], [0.263, 0.358], [0.262, 0.33]].map(([u, v]) => this.paintAt(u, v, 3));
     this.porterLen = []; let L = 0; for (let i = 1; i < this.porterPath.length; i++) { L += this.porterPath[i].distanceTo(this.porterPath[i - 1]); this.porterLen.push(L); }
     this.porterTotal = L;
-    // a porter: a hooded figure bent under a sack of glowing ore (drawn here, two steps of a walk)
-    this.porterTex = [0, 1].map((step) => {
-      const c = document.createElement('canvas'); c.width = 64; c.height = 96; const x = c.getContext('2d');
-      x.fillStyle = '#07080b';
-      x.beginPath(); x.moveTo(36, 30); x.quadraticCurveTo(46, 36, 44, 56); x.lineTo(43, 76); x.lineTo(24, 76); x.lineTo(26, 54); x.quadraticCurveTo(26, 36, 36, 30); x.fill();   // a bent back under a cloak
-      x.beginPath(); x.ellipse(40, 28, 7, 8, 0.5, 0, Math.PI * 2); x.fill();                        // the hood, head bowed forward
-      x.save(); x.translate(step ? -3 : 3, 0); x.fillRect(28, 74, 6, 18); x.restore();                // a leg
-      x.save(); x.translate(step ? 3 : -3, 0); x.fillRect(35, 74, 6, 18); x.restore();                // the other
-      x.beginPath(); x.moveTo(42, 40); x.lineTo(50, 52); x.lineTo(47, 54); x.lineTo(40, 44); x.fill(); // an arm reaching up to the sack
-      // the sack over his shoulder: lumpy cloth, ore glowing through its neck and seams
-      x.beginPath(); x.moveTo(30, 22); x.bezierCurveTo(10, 18, 4, 40, 12, 54); x.bezierCurveTo(18, 62, 30, 58, 34, 46); x.bezierCurveTo(38, 36, 38, 26, 30, 22); x.closePath();
-      const sg = x.createLinearGradient(30, 22, 14, 58); sg.addColorStop(0, '#6a4520'); sg.addColorStop(0.5, '#3b2614'); sg.addColorStop(1, '#1c120a');
-      x.fillStyle = sg; x.fill();
-      const gl = x.createRadialGradient(30, 24, 0, 30, 24, 12); gl.addColorStop(0, 'rgba(255,215,130,1)'); gl.addColorStop(0.4, 'rgba(255,140,40,0.8)'); gl.addColorStop(1, 'rgba(255,100,20,0)');
-      x.fillStyle = gl; x.beginPath(); x.arc(30, 24, 12, 0, Math.PI * 2); x.fill();                  // ore glowing from the open neck
-      x.strokeStyle = 'rgba(255,150,50,0.55)'; x.lineWidth = 1.2; x.beginPath(); x.moveTo(16, 36); x.quadraticCurveTo(22, 44, 20, 52); x.stroke();   // a seam
-      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-    });
+    // a porter: a hooded figure bent under a sack of glowing ore, drawn here as a jointed figure in every pose of
+    // a walk (8 frames), a climb up steps (8 frames) and a rest; one strip of frames that each porter looks into
+    const FW = 64, FH = 96, NF = 17, pc = document.createElement('canvas'); pc.width = FW * NF; pc.height = FH;
+    const x = pc.getContext('2d');
+    for (let f = 0; f < 8; f++) this.drawPorter(x, f * FW, f / 8, 'walk');
+    for (let f = 0; f < 8; f++) this.drawPorter(x, (8 + f) * FW, f / 8, 'climb');
+    this.drawPorter(x, 16 * FW, 0, 'rest');
+    this.porterAtlas = new THREE.CanvasTexture(pc); this.porterAtlas.colorSpace = THREE.SRGBColorSpace;
+    this.porterFrames = NF;
     this.porters = [];
     // the gate's light, and the count beside it
     this.gateGlow = this.glowSprite(0xff9a3a, Wp * 0.22, 0.4); this.gateGlow.position.copy(this.paintAt(0.262, 0.27, 2.5)); this.gateGlow.material.toneMapped = false; g.add(this.gateGlow);
@@ -662,6 +653,60 @@ class Game {
     this.stormLight = new THREE.AmbientLight(0xb8c8ff, 0); this.scene.add(this.stormLight);   // lightning lights the headframe and him too
     this.vs = { shown: null, carry: 0, flash: 0, lightning: 0, nextBolt: 4 + Math.random() * 6, spawn: 0, queue: [], pending: 0 };
     this.scene.add(g);
+  }
+  // one pose of a porter, facing right, feet on y = 92 of a 64x96 frame. p: where in the stride (0..1).
+  drawPorter(x, ox, p, mode) {
+    const D = Math.PI / 180, climb = mode === 'climb', rest = mode === 'rest', TH = 16, SH = 17;
+    const swing = (q) => Math.sin(2 * Math.PI * q), lift = (q) => Math.max(0, Math.cos(2 * Math.PI * q));   // forward/back, and the knee lifting as the leg comes through
+    const legs = [p + 0.5, p];   // the far leg first, then the near one
+    // the hip sinks a little when the legs are spread and rises as they pass; on stairs each step is a push up
+    const hipY = 92 - TH - SH + 3 + (rest ? 2 : climb ? 2.5 * Math.abs(swing(p)) : 1.6 * Math.abs(swing(p)));
+    const hip = { x: 30, y: hipY };
+    const lean = (rest ? 34 : climb ? 26 : 18) * D;   // bent forward under the load, more on the stairs
+    const sh = { x: hip.x + Math.sin(lean) * 22, y: hip.y - Math.cos(lean) * 22 };
+    x.lineCap = 'round'; x.lineJoin = 'round';
+    const leg = (q, col) => {
+      let th, kn;
+      if (rest) { th = (q === p ? 8 : -4) * D; kn = 12 * D; }
+      else if (climb) { th = (18 + 26 * swing(q)) * D; kn = (8 + 50 * lift(q)) * D; }   // high knee up the step, a straight leg pushing behind
+      else { th = 24 * swing(q) * D; kn = (6 + 42 * lift(q)) * D; }
+      const knee = { x: hip.x + Math.sin(th) * TH, y: hip.y + Math.cos(th) * TH };
+      const sa = th - kn, foot = { x: knee.x + Math.sin(sa) * SH, y: knee.y + Math.cos(sa) * SH };
+      x.strokeStyle = col; x.lineWidth = 5.5;
+      x.beginPath(); x.moveTo(hip.x, hip.y); x.lineTo(knee.x, knee.y); x.lineTo(foot.x, foot.y); x.stroke();
+      x.lineWidth = 4; x.beginPath(); x.moveTo(foot.x - 1, foot.y); x.lineTo(foot.x + 5, foot.y + 0.5); x.stroke();   // a boot
+    };
+    x.save(); x.translate(ox, 0);
+    leg(legs[0], '#030305');
+    // the cloak: a heavy hooded body from the hip to the shoulders, its hem swinging a little with the stride
+    const hem = rest ? 0 : swing(p) * 1.5;
+    x.fillStyle = '#08090d';
+    x.beginPath();
+    x.moveTo(hip.x - 8 + hem, hip.y + 10); x.lineTo(hip.x + 8 + hem, hip.y + 9);
+    x.quadraticCurveTo(sh.x + 9, sh.y + 6, sh.x + 5, sh.y - 3);
+    x.quadraticCurveTo(sh.x - 4, sh.y - 6, sh.x - 9, sh.y + 2);
+    x.quadraticCurveTo(hip.x - 10, hip.y - 4, hip.x - 7 + hem, hip.y + 9); x.fill();
+    // the hood, bowed forward
+    const hd = { x: sh.x + Math.sin(lean + 0.6) * 6, y: sh.y - Math.cos(lean + 0.6) * 6 + 1 };
+    x.beginPath(); x.ellipse(hd.x, hd.y, 6, 7, lean, 0, Math.PI * 2); x.fill();
+    // the sack: on his back, over the shoulders, swaying a touch against the step
+    const sway = rest ? 0 : swing(p * 2) * 0.8;
+    const sk = { x: sh.x - 9 + sway, y: sh.y + 7 };
+    x.save(); x.translate(sk.x, sk.y); x.rotate(-0.2 + lean * 0.6); x.scale(0.72, 0.72);
+    x.beginPath(); x.moveTo(3, -12); x.bezierCurveTo(-11, -12, -14, 6, -8, 13); x.bezierCurveTo(-2, 18, 9, 14, 10, 4); x.bezierCurveTo(11, -4, 9, -11, 3, -12); x.closePath();
+    const sg = x.createLinearGradient(3, -12, -6, 15); sg.addColorStop(0, '#6e4822'); sg.addColorStop(0.55, '#3b2614'); sg.addColorStop(1, '#1a1009');
+    x.fillStyle = sg; x.fill();
+    const gl = x.createRadialGradient(3, -11, 0, 3, -11, 9); gl.addColorStop(0, 'rgba(255,220,140,1)'); gl.addColorStop(0.45, 'rgba(255,140,40,0.75)'); gl.addColorStop(1, 'rgba(255,100,20,0)');
+    x.fillStyle = gl; x.beginPath(); x.arc(3, -11, 9, 0, Math.PI * 2); x.fill();   // ore glowing at the open neck
+    x.strokeStyle = 'rgba(255,150,50,0.45)'; x.lineWidth = 1; x.beginPath(); x.moveTo(-8, -2); x.quadraticCurveTo(-4, 5, -5, 11); x.stroke();   // a seam
+    x.restore();
+    // a rope from the sack over his shoulder, and his arm bent at the chest holding it down
+    x.strokeStyle = '#2b2118'; x.lineWidth = 1.4;
+    x.beginPath(); x.moveTo(sk.x + 2, sk.y - 7); x.quadraticCurveTo(sh.x + 2, sh.y - 4, sh.x + 5, sh.y + 6); x.stroke();
+    x.strokeStyle = '#0b0c11'; x.lineWidth = 4.5;
+    x.beginPath(); x.moveTo(sh.x, sh.y + 1); x.lineTo(sh.x + 3, sh.y + 11); x.lineTo(sh.x + 6, sh.y + 6); x.stroke();
+    leg(legs[1], '#0b0c11');
+    x.restore();
   }
   placeVaultShow() { if (this.vaultMon && this.mine && this.camDist) this.fitVault(); }
   // the painting stands between the top bar and the horizon, to the left of the hatch, its ground on the ground line
@@ -701,10 +746,11 @@ class Game {
   }
   porter(carry, down) {
     if (this.porters.length >= 40) { this.vs.shown += carry; return; }
-    const mat = new THREE.SpriteMaterial({ map: this.porterTex[0], transparent: true, depthWrite: false, opacity: 0, toneMapped: false, side: THREE.DoubleSide })   // double-sided: a mirrored sprite would be culled;
-    const s = new THREE.Sprite(mat), h = this.vaultDims.Hp * V.porterSize; s.scale.set(h * 0.66, h, 1); s.center.set(0.5, 0.08);
+    const map = this.porterAtlas.clone(); map.repeat.set(1 / this.porterFrames, 1); map.needsUpdate = true;   // his own window onto the strip of poses
+    const mat = new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, opacity: 0, toneMapped: false, side: THREE.DoubleSide });   // double-sided: a mirrored sprite would be culled
+    const s = new THREE.Sprite(mat), h = this.vaultDims.Hp * V.porterSize; s.scale.set(h * 0.66, h, 1); s.center.set(0.5, 4 / 96);   // his feet on the path
     s.renderOrder = -1; this.vaultMon.add(s);
-    this.porters.push({ s, d: down ? this.porterTotal : 0, carry, down, speed: this.porterTotal / (down ? 30 : 50) * (0.85 + Math.random() * 0.3), step: Math.random(), rest: 0, leg: -1 });
+    this.porters.push({ s, d: down ? this.porterTotal : 0, carry, down, speed: this.porterTotal / (down ? 34 : 46) * (0.9 + Math.random() * 0.2), stride: Math.random(), rest: 0, leg: -1, frame: -1 });
   }
   porterAt(d) {   // a point on the way, and which way it runs there
     const P = this.porterPath, Ls = this.porterLen;
@@ -724,18 +770,19 @@ class Game {
       else { this.porter(this.vs.pending, false); this.vs.pending = 0; this.vs.spawn = V.porterEvery * (0.7 + Math.random() * 0.6); }
     }
     this.porters = this.porters.filter((q) => {
-      // a burden: each step a heave and a sag, slower on the stairs, and a rest on each landing to catch his breath
-      const here = this.porterAt(q.d);
-      if (here.leg !== q.leg) { if (q.leg >= 0 && here.onStairs && !q.down) q.rest = 1.2 + Math.random() * 2; q.leg = here.leg; }
+      // a steady, heavy pace: slower and shorter steps on the stairs, and a rest on each landing to catch his breath.
+      // The legs move with the ground covered, so his feet don't slide.
+      const here = this.porterAt(q.d), hgt = this.vaultDims.Hp * V.porterSize;
+      if (here.leg !== q.leg) { if (q.leg >= 0 && here.onStairs && !q.down) q.rest = 1.5 + Math.random() * 2; q.leg = here.leg; }
       if (q.rest > 0) q.rest -= dt;
-      else { q.step += dt * 1.1; const heave = Math.pow(Math.sin(q.step * Math.PI), 2); q.d += (q.down ? -1 : 1) * q.speed * dt * (here.onStairs ? 0.55 : 1) * (0.25 + 1.5 * heave); }
+      else { const v = q.speed * (here.onStairs ? 0.5 : 1) * dt; q.d += q.down ? -v : v; q.stride += v / (hgt * (here.onStairs ? 0.45 : 0.6)); }
       const end = q.down ? q.d <= 0 : q.d >= this.porterTotal;
-      if (end) { this.vaultMon.remove(q.s); q.s.material.dispose(); if (!q.down) { this.vs.shown += q.carry; if (q.carry) this.vs.flash = Math.min(1, this.vs.flash + 0.12); } return false; }
+      if (end) { this.vaultMon.remove(q.s); q.s.material.map.dispose(); q.s.material.dispose(); if (!q.down) { this.vs.shown += q.carry; if (q.carry) this.vs.flash = Math.min(1, this.vs.flash + 0.12); } return false; }
       const at = this.porterAt(q.d), dir = (q.down ? -1 : 1) * Math.sign(at.dx || 1);
-      const frame = Math.floor(q.step) % 2;
-      if (q.s.material.map !== this.porterTex[frame]) { q.s.material.map = this.porterTex[frame]; q.s.material.needsUpdate = true; }
-      q.s.position.copy(at.p); q.s.position.y -= (q.rest > 0 ? 1 : Math.abs(Math.cos(q.step * Math.PI))) * this.vaultDims.Hp * 0.003;   // he sinks under the load between steps, and while he rests
-      q.s.scale.x = Math.abs(q.s.scale.x) * (dir < 0 ? -1 : 1); q.s.material.rotation = (dir < 0 ? 1 : -1) * (q.down ? 0 : 0.12 + (q.rest > 0 ? 0.08 : 0));   // bent forward under the sack
+      const climbing = at.onStairs && !q.down, frame = q.rest > 0 ? 16 : (climbing ? 8 : 0) + (Math.floor(q.stride * 8) % 8);
+      if (frame !== q.frame) { q.frame = frame; q.s.material.map.offset.x = frame / this.porterFrames; }
+      q.s.position.copy(at.p);
+      q.s.scale.x = Math.abs(q.s.scale.x) * (dir < 0 ? -1 : 1);
       const fadeIn = Math.min(1, (q.down ? this.porterTotal - q.d : q.d) / (this.porterTotal * 0.04)), fadeOut = Math.min(1, (q.down ? q.d : this.porterTotal - q.d) / (this.porterTotal * 0.03));
       q.s.material.opacity = Math.min(fadeIn, fadeOut) * (up ? 1 : 0);
       return true;
