@@ -21,7 +21,7 @@ const V = {
   depth: 2.3 * T,            // how deep the tunnels go into the rock, front to back
   viewHeight: S.minerHeight / S.minerScreenShare,   // world units the camera shows top to bottom, as in 2D
   fov: 32, tilt: 0.07,       // camera: field of view, and a slight look down
-  lampIntensity: 120, lampDistance: S.lightRadius * T * 2.6, lampDecay: 1, lampOffset: [0, 18, 42], lampColor: 0xffc890,   // an oil flame: warm, but closer to white than to yellow
+  lampIntensity: 120, lampDistance: S.lightRadius * T * 2.6, lampDecay: 1, lampOffset: [0, 18, 42], lampFill: 0.45,   // share of the lamp's light that casts no shadow (softens his shadow) lampColor: 0xffc890,   // an oil flame: warm, but closer to white than to yellow
   lampHalo: 0.1, flameSize: 0.05,
   ambient: 0.55,             // what lets the fog's "seen" areas stay dimly visible
   moon: 1.1,                 // light on the surface at night
@@ -132,6 +132,7 @@ class Game {
     this.lampLight = new THREE.PointLight(V.lampColor, V.lampIntensity, V.lampDistance, V.lampDecay);
     this.lampLight.castShadow = true; this.lampLight.shadow.mapSize.set(1024, 1024); this.lampLight.shadow.bias = -0.002; this.lampLight.shadow.camera.near = 2;
     this.scene.add(this.lampLight);
+    this.lampFill = new THREE.PointLight(V.lampColor, V.lampIntensity * V.lampFill, V.lampDistance, V.lampDecay); this.scene.add(this.lampFill);
 
     this.mine = null; this.nodes = [];
     this.mode = 'ground'; this.lvl = -1; this.ladderK = null; this.mx = 0; this.my = 0; this.vx = 0; this.vy = 0; this.falling = null;
@@ -351,6 +352,7 @@ class Game {
     const pick = this.pick = new THREE.Group(); pick.matrixAutoUpdate = false; g.add(pick);
     if (this.A.models.pick) {   // the generated pickaxe, turned so its handle runs along +Y from the grip and its head points along +X
       const p = this.A.models.pick.scene.clone(true); p.scale.setScalar(H * V.pickLength);
+      p.rotation.x = Math.PI / 2;   // exported from Blender with the handle along its Y, which glTF turns into -Z
       p.traverse((m) => { if (m.isMesh) fogged(m.material); });
       pick.add(p);
     }
@@ -808,7 +810,16 @@ class Game {
       const y = new THREE.Vector3(0, 0, -1).applyQuaternion(hq), fingers = new THREE.Vector3(0, 1, 0).applyQuaternion(hq);
       const x = new THREE.Vector3().crossVectors(right, y); if (x.lengthSq() < 1e-4) x.copy(fingers); x.normalize();
       const z = new THREE.Vector3().crossVectors(x, y);
-      this.pick.matrix.makeBasis(x, y, z).setPosition(hand.addScaledVector(fingers, H * 0.035));
+      const grip = hand.clone().addScaledVector(fingers, H * 0.035);
+      const swingM = new THREE.Matrix4().makeBasis(x, y, z);
+      // carrying: hanging from his hand, the head down and a little forward, the blade pointing the way he faces
+      const cy = up.clone().multiplyScalar(-0.93).addScaledVector(face, 0.3).normalize();
+      const cx = face.clone().addScaledVector(cy, -face.dot(cy)).normalize(), cz = new THREE.Vector3().crossVectors(cx, cy);
+      const carryM = new THREE.Matrix4().makeBasis(cx, cy, cz);
+      const want = this.mining || this.swingT > 0 ? 1 : 0;
+      this.pickBlend = (this.pickBlend ?? want) + (want - (this.pickBlend ?? want)) * Math.min(1, real * 9);
+      const qa = new THREE.Quaternion().setFromRotationMatrix(carryM), qb = new THREE.Quaternion().setFromRotationMatrix(swingM);
+      this.pick.matrix.makeRotationFromQuaternion(qa.slerp(qb, this.pickBlend)).setPosition(grip);
       if (this.mode === 'ladder' && this.bones.chest) {   // both hands on the rungs: the pick rides across his back, head up by his shoulder
         const c = at(this.bones.chest), sy = up.clone().multiplyScalar(0.85).addScaledVector(right, -0.5).normalize();
         const sx = new THREE.Vector3().crossVectors(sy, face).normalize(), sz = new THREE.Vector3().crossVectors(sx, sy);
@@ -853,7 +864,8 @@ class Game {
     const L = this.lamp();
     this.lampLight.visible = lit;
     this.lampLight.position.set(L.x + V.lampOffset[0], -L.y + V.lampOffset[1], L.z + V.lampOffset[2]);   // a little in front, so he is not blown out
-    this.lampLight.intensity = V.lampIntensity * (1 + 0.04 * Math.sin(this.clock * 9));
+    this.lampLight.intensity = V.lampIntensity * (1 - V.lampFill) * (1 + 0.04 * Math.sin(this.clock * 9));
+    this.lampFill.visible = lit; this.lampFill.position.copy(this.lampLight.position); this.lampFill.intensity = V.lampIntensity * V.lampFill;
     this.lampGlow.visible = lit; this.lampGlow.position.set(L.x, -L.y, L.z + 2); this.lampGlow.material.opacity = V.lampHalo * (1 + 0.08 * Math.sin(this.clock * 11));
     const flick = 1 + 0.06 * Math.sin(this.clock * 13) + 0.04 * Math.sin(this.clock * 29 + 1);
     if (this.lampMats) this.lampMats.forEach((mt) => { mt.emissiveIntensity = lit ? 0.55 * flick : 0; });
