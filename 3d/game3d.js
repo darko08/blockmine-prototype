@@ -1297,7 +1297,8 @@ class Net {
       if (g.mining && g.mining.id === id) g.mining = null;
     }
     if (m.hp) for (const id in m.hp) { const n = g.nodes.find((q) => q.id === +id); if (n) n.hp = m.hp[id]; }
-    this.drawOthers(m.near || [], m.far || []);
+    if (m.far) this.far = m.far;
+    this.drawOthers(m.near || [], this.far || []);
   }
   snap(pl) {   // the server says he cannot be where the page put him: back to where he really is
     const g = this.g, G = g.mine.G;

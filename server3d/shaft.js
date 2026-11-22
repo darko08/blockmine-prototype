@@ -10,6 +10,8 @@ const S = globalThis.SETTINGS, T = S.tile;
 
 const SEND_EVERY = 0.2;            // s between state messages to each miner
 const NEAR = 18 * T;               // other miners nearer than this are drawn in full; the rest as points of light
+const NEAR_MAX = 12;               // at most this many drawn in full (the nearest)
+const FAR_EVERY = 1;               // s between updates of the far lights
 const GLIMMER = 3;                 // ore glimmers (no kind, no value) out to this many times the light
 const SLACK = 0.35;                // s of network jitter forgiven on every move
 const MAX_MSGS = 40;               // per second per miner; more are dropped
@@ -300,14 +302,24 @@ class Shaft {
       const v = m.vaultHome;
       if (p.shift && v && m.nodes.includes(v)) { const a = this.xy(p.place); out.hum = Math.round(Math.max(0, 1 - Math.hypot(v.x - a.x, v.y - a.y) / 900) * 100) / 100; }
       // the other miners: near ones in full, far ones as points of light
-      const a = this.xy(p.place), near = [], far = [];
+      const a = this.xy(p.place), cand = [], far = [], sendFar = this.clock - (p.farT || 0) >= FAR_EVERY;
       for (const q of this.players.values()) {
         if (q === p || !q.shift) continue;
-        const b = this.xy(q.place);
-        if (Math.hypot(b.x - a.x, b.y - a.y) < NEAR) near.push({ id: q.id, name: q.name, p: q.place, f: q.facing, w: this.weight(q), m: q.mining ? q.mining.n.id : 0 });
-        else far.push([Math.round(b.x / T), Math.round(b.y / T)]);
+        const b = this.xy(q.place), d = Math.hypot(b.x - a.x, b.y - a.y);
+        if (d < NEAR) cand.push({ q, d }); else if (sendFar) far.push([Math.round(b.x / T), Math.round(b.y / T)]);
       }
-      out.near = near; out.far = far;
+      cand.sort((u, v) => u.d - v.d);
+      const near = [];
+      p.names = p.names || new Set();
+      cand.forEach(({ q, d }, i) => {
+        if (i >= NEAR_MAX) { if (sendFar) { const b = this.xy(q.place); far.push([Math.round(b.x / T), Math.round(b.y / T)]); } return; }
+        const pl = q.place.k !== undefined ? { k: q.place.k, y: Math.round(q.place.y) } : { l: q.place.l, x: Math.round(q.place.x) };
+        const v = { id: q.id, p: pl, f: q.facing, m: q.mining ? q.mining.n.id : 0 };
+        if (!p.names.has(q.id)) { p.names.add(q.id); v.name = q.name; }   // a name is sent once
+        near.push(v);
+      });
+      out.near = near;
+      if (sendFar) { out.far = far; p.farT = this.clock; }
     }
     p.conn.send(out);
   }

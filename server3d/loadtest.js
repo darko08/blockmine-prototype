@@ -26,7 +26,7 @@ function bot(port, i, cheater, out) {
     else if (m.t === 'block') { if (m.mine) { b.mine = Object.assign({ S, R, G: MineGen.geometry(S, R) }, m.mine); b.G = b.mine.G; } b.hatch = m.hatch; b.known.clear(); }
     else if (m.t === 'knock') { b.hatch = 'shut'; }
     else if (m.t === 'state') { b.hatch = m.hatch; for (const n of m.nodes || []) b.known.set(n.id, n); for (const id of m.gone || []) b.known.delete(id); }
-    else if (m.t === 'entered') { b.shift = true; b.place = m.place; b.bag = []; b.goal = 'down'; b.target = 2 + Math.floor(Math.random() * 12); b.start = Date.now(); }
+    else if (m.t === 'entered') { b.shift = true; b.place = m.place; b.bag = []; b.goal = 'down'; b.target = 1 + Math.floor(Math.random() * 6); b.start = Date.now(); }
     else if (m.t === 'got') { b.bag = m.bag; b.known.delete(m.id); b.mining = null; }
     else if (m.t === 'bag') { b.bag = m.bag; }
     else if (m.t === 'snap') { b.snaps++; b.place = m.place; b.mining = null; }
@@ -53,7 +53,7 @@ function bot(port, i, cheater, out) {
     } else if (b.goal === 'down') {
       // at the target level: the nearest amber his lamp has shown, else wander; leave when the bag is fullish or late
       const n = [...b.known.values()].filter((q) => q.l === p.l && q.kind !== 'vault' && w() + q.weight <= R.bagCapacity).sort((a, c) => Math.abs(a.standX - p.x) - Math.abs(c.standX - p.x))[0];
-      if ((Date.now() - b.start) / 1000 > 120 || w() > 28) { b.goal = 'up'; return; }
+      if ((Date.now() - b.start) / 1000 > 50 || w() > 20) { b.goal = 'up'; return; }
       if (n) { if (toward(n.standX)) { b.mining = n.id; b.lastStroke = 0; send({ t: 'pick', id: n.id }); } }
       else { const [a, c] = MineGen.span(m, p.l); if (b.wander === null || Math.abs(b.wander - p.x) < 2) b.wander = a + Math.random() * (c - a); toward(b.wander); }
     } else {
