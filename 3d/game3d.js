@@ -305,6 +305,7 @@ class Game {
       }
       // the level number at the start of each level
       const label = this.textSprite('LEVEL ' + (l + 1), 11); label.position.set(x + 4, -(cy - 3), zf); label.center.set(0, 0); this.world.add(label);
+      label.material.depthTest = false; label.renderOrder = 30; label.visible = false; (this.levelLabels = this.levelLabels || [])[l] = label;   // shown whole once he gets there, never half under the dark
     });
     // the headframe over the shaft, and the hatch lid when the hatch is shut
     const hx = G.colX(m.c0);
@@ -768,6 +769,7 @@ class Game {
     }
     for (const n of this.nodes) n.flash = Math.max(0, (n.flash || 0) - dt);
     if (this.mine) this.draw(real, dt);
+    if (this.levelLabels && this.lvl >= 0 && this.levelLabels[this.lvl]) this.levelLabels[this.lvl].visible = true;
     this.hud();
     this.renderer.render(this.scene, this.camera);
   }
