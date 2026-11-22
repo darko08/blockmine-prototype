@@ -257,9 +257,11 @@ if (!isMainThread) {
   });
   const races = [];
   for (const miners of crowds) for (const k of [1, 10]) if (k < miners) races.push({ miners, k });
-  Promise.all([...crowds.map((m) => job(m, 0)), ...races.map((r) => job(r.miners, r.k))]).then((all) => {
-    const results = all.slice(0, crowds.length);
-    results.races = races.map((r, i) => ({ ...r, s: all[crowds.length + i].strategies['vault runner'] }));
+  const RACES_ONLY = process.env.RACES_ONLY === '1';   // only the Vault race (after a change to the Vault's money)
+  const main = RACES_ONLY ? [] : crowds;
+  Promise.all([...main.map((m) => job(m, 0)), ...races.map((r) => job(r.miners, r.k))]).then((all) => {
+    const results = all.slice(0, main.length);
+    results.races = races.map((r, i) => ({ ...r, s: all[main.length + i].strategies['vault runner'] }));
     if (jsonOut) require('fs').writeFileSync(jsonOut, JSON.stringify({ rules: R, results }, null, 1));
     report(results, shifts, (Date.now() - t0) / 1000);
   });

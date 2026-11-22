@@ -1,0 +1,111 @@
+
+=== 10 miners below · 516,092 blocks · pot low 100,143 · paid out 1,237,856,101 of 1,568,504,000 in (seed incl.) · never paid more than came in
+strategy                caught  kept/lamp  return  worst1%  best1%   below  reach15  ahead
+diver 1                  10.6%        216     72%        0   1,017     83s       0%    25%
+diver 2                  16.1%        219     73%        0     682    109s       0%    28%
+diver 3                  19.8%        210     70%        0     668    132s       0%    27%
+diver 4                  20.8%        194     65%        0     731    136s       0%    22%
+diver 5                  23.9%        183     61%        0     724    154s       0%    21%
+diver 6                  26.8%        178     59%        0     725    171s       0%    21%
+diver 7                  28.3%        268     89%        0   1,243    180s       0%    43%
+diver 8                  31.0%        256     85%        0   1,251    196s       0%    41%
+diver 9                  32.1%        175     58%        0   1,109    199s       0%    24%
+diver 10                 33.1%        285     95%        0   2,228    206s       0%    35%
+diver 11                 35.6%        285     95%        0   2,239    220s       0%    35%
+diver 12                 38.0%        285     95%        0   2,268    234s       0%    35%
+diver 13                 37.8%        109     36%        0   1,412    233s       0%    12%
+diver 14                 39.9%        107     36%        0   1,410    246s       0%    12%
+diver 15                 39.8%          0      0%        0       0    245s      78%     0%
+shallow farmer           17.6%          0      0%        0       0    114s       0%     0%
+top skimmer               8.9%        177     59%        0     699     70s       0%    12%
+picks on the way down    43.6%        255     85%        0   1,730    274s       0%    40%
+picks on the way up      38.8%        285     95%        0   2,134    242s       0%    37%
+dropper                  35.9%        209     70%        0   1,980    223s       0%    25%
+vault runner             41.7%        275     92%        0     972    259s      78%    50%
+wide light (4 oil)       31.0%        254     51%        0   1,869    194s       0%    15%
+basic light              31.0%        244     81%        0   1,843    196s       0%    32%
+relay pair               35.9%         61     20%        0     923    224s       0%     7%
+PASS never pays out more than the pot holds
+PASS no strategy returns more than it costs
+PASS no strategy beats the others by more than a tenth (best within 10% of the second best)
+PASS about one shallow run in four slightly ahead (levels 1-3 and the top skimmer, 15-35%)
+PASS a basic lamp reaches level 15 in a real share (diver 15 >= 30%)
+best 95% · second 95% · median 70% · shallow runs ahead 23%
+crowd learned: picks on the way up 53% · diver 10 3% · diver 12 2% · vault runner 2% · diver 11 2% · diver 1 2% · diver 2 2% · diver 3 2% · diver 4 2% · diver 5 2% · diver 6 2% · diver 7 2% · diver 8 2% · diver 9 2% · diver 13 2% · diver 14 2% · diver 15 2% · shallow farmer 2% · top skimmer 2% · picks on the way down 2% · dropper 2% · wide light (4 oil) 2% · basic light 2% · relay pair 2%
+
+=== 50 miners below · 105,370 blocks · pot low 100,173 · paid out 1,262,351,573 of 1,601,324,800 in (seed incl.) · never paid more than came in
+strategy                caught  kept/lamp  return  worst1%  best1%   below  reach15  ahead
+diver 1                  12.6%        261     87%        0   1,063    100s       0%    37%
+diver 2                  18.0%        261     87%        0   1,073    121s       0%    38%
+diver 3                  21.6%        260     87%        0   1,079    142s       0%    39%
+diver 4                  24.2%        260     87%        0   1,386    155s       0%    35%
+diver 5                  27.4%        260     87%        0   1,405    174s       0%    36%
+diver 6                  30.5%        261     87%        0   1,405    191s       0%    36%
+diver 7                  30.1%        260     87%        0   1,983    189s       0%    32%
+diver 8                  32.9%        260     87%        0   1,986    204s       0%    33%
+diver 9                  35.4%        252     84%        0   2,005    218s       0%    31%
+diver 10                 35.4%        260     87%        0   3,071    219s       0%    27%
+diver 11                 37.3%        261     87%        0   2,959    232s       0%    28%
+diver 12                 39.8%        260     87%        0   3,086    244s       0%    27%
+diver 13                 41.6%        240     80%        0   2,961    255s       0%    25%
+diver 14                 43.6%        252     84%        0   3,063    268s       0%    26%
+diver 15                 42.8%          0      0%        0       0    264s      78%     0%
+shallow farmer           23.0%          0      0%        0       0    145s       0%     0%
+top skimmer               9.1%        181     60%        0     836     71s       0%    19%
+picks on the way down    37.5%        174     58%        0   2,124    232s       0%    19%
+picks on the way up      39.1%        260     87%        0   2,922    240s       0%    28%
+dropper                  39.0%        249     83%        0   2,842    239s       0%    27%
+vault runner             40.7%        261     87%        0   1,335    253s      78%    34%
+wide light (4 oil)       33.8%        331     66%        0   2,754    213s       0%    26%
+basic light              33.7%        260     87%        0   2,438    209s       0%    31%
+relay pair               38.6%         65     22%        0   1,262    238s       0%     8%
+PASS never pays out more than the pot holds
+PASS no strategy returns more than it costs
+PASS no strategy beats the others by more than a tenth (best within 10% of the second best)
+PASS about one shallow run in four slightly ahead (levels 1-3 and the top skimmer, 15-35%)
+PASS a basic lamp reaches level 15 in a real share (diver 15 >= 30%)
+best 87% · second 87% · median 87% · shallow runs ahead 34%
+crowd learned: picks on the way up 24% · diver 7 7% · diver 8 6% · diver 2 5% · diver 4 5% · diver 10 5% · diver 5 4% · diver 12 4% · diver 3 4% · diver 11 4% · diver 1 4% · diver 6 4% · vault runner 2% · diver 9 2% · diver 14 2% · dropper 2% · basic light 2% · diver 13 2% · diver 15 2% · shallow farmer 2% · top skimmer 2% · picks on the way down 2% · wide light (4 oil) 2% · relay pair 2%
+
+=== 200 miners below · 28,606 blocks · pot low 100,269 · paid out 1,357,480,033 of 1,750,399,200 in (seed incl.) · never paid more than came in
+strategy                caught  kept/lamp  return  worst1%  best1%   below  reach15  ahead
+diver 1                  24.0%        253     84%        0   1,464    184s       0%    34%
+diver 2                  31.8%        253     84%        0   1,427    200s       0%    35%
+diver 3                  34.5%        254     85%        0   1,434    217s       0%    35%
+diver 4                  36.6%        254     85%        0   1,816    229s       0%    33%
+diver 5                  39.2%        254     85%        0   1,763    245s       0%    34%
+diver 6                  41.3%        254     85%        0   1,859    258s       0%    33%
+diver 7                  42.3%        253     84%        0   2,906    259s       0%    29%
+diver 8                  44.2%        254     85%        0   2,646    272s       0%    30%
+diver 9                  46.0%        254     85%        0   2,691    284s       0%    30%
+diver 10                 46.9%        253     84%        0   4,219    287s       0%    22%
+diver 11                 48.5%        254     85%        0   4,820    297s       0%    21%
+diver 12                 50.0%        253     84%        0   4,779    308s       0%    21%
+diver 13                 51.9%        251     84%        0   3,902    317s       0%    23%
+diver 14                 53.4%        252     84%        0   4,086    327s       0%    22%
+diver 15                 52.9%          0      0%        0       0    324s      79%     0%
+shallow farmer           37.5%          0      0%        0       0    232s       0%     0%
+top skimmer               9.2%        140     47%        0   1,060     96s       0%    13%
+picks on the way down    47.3%        207     69%        0   2,884    290s       0%    23%
+picks on the way up      49.5%        253     84%        0   4,149    304s       0%    23%
+dropper                  49.6%        245     82%        0   3,624    303s       0%    23%
+vault runner             38.4%        254     85%        0   3,486    238s      79%    10%
+wide light (4 oil)       45.3%        425     85%        0   5,429    280s       0%    25%
+basic light              44.9%        253     84%        0   3,452    276s       0%    28%
+relay pair               49.5%         63     21%        0   1,744    302s       0%     7%
+PASS never pays out more than the pot holds
+PASS no strategy returns more than it costs
+PASS no strategy beats the others by more than a tenth (best within 10% of the second best)
+PASS about one shallow run in four slightly ahead (levels 1-3 and the top skimmer, 15-35%)
+PASS a basic lamp reaches level 15 in a real share (diver 15 >= 30%)
+best 85% · second 85% · median 84% · shallow runs ahead 29%
+crowd learned: picks on the way up 16% · diver 7 6% · diver 2 6% · diver 11 6% · diver 8 6% · diver 3 5% · diver 1 5% · diver 10 5% · diver 4 5% · diver 12 5% · diver 5 4% · diver 6 4% · wide light (4 oil) 3% · vault runner 3% · basic light 2% · diver 9 2% · diver 14 2% · diver 13 2% · dropper 2% · diver 15 2% · shallow farmer 2% · top skimmer 2% · picks on the way down 2% · relay pair 2%
+
+=== the Vault race: one runner alone vs ten racing for the one piece each block
+  10 miners ·  1 vault runner  · return 17% · caught 41.7% · ahead 0.0% · best1% 230
+  50 miners ·  1 vault runner  · return 59% · caught 41.2% · ahead 33.9% · best1% 891
+  50 miners · 10 vault runners · return 9% · caught 38.2% · ahead 5.0% · best1% 710
+ 200 miners ·  1 vault runner  · return 103% · caught 38.6% · ahead 12.7% · best1% 3,576
+ 200 miners · 10 vault runners · return 33% · caught 37.6% · ahead 4.0% · best1% 3,153
+
+ALL CHECKS PASS · 100,000 shifts per strategy per crowd · 28,964.9 s

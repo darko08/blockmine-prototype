@@ -42,10 +42,10 @@
     // ---------- the pot, the Vault and the studio (the money table in the brief) ----------
     seedPot: 100000,                             // the owner's: seed the points pot at the start of the season
     budgetShareOfPot: 0.04,                      // each block places this share of the pot as amber
-    salesTo: { pot: 0.8965, vault: 0.0035, counter: 0.10, studio: 0 },   // first guess pot .85 / Vault .05: the simulator
-                                                 // keeps 7% of the Vault's flow (more made a lone Vault runner win)
+    salesTo: { pot: 0.897, vault: 0.003, counter: 0.10, studio: 0 },     // first guess pot .85 / Vault .05: the simulator
+                                                 // keeps 6% of the Vault's flow (more made a lone Vault runner win)
     carriedOutTo: { miner: 0.9, studio: 0.1 },
-    caughtTo: { pot: 0.872, vault: 0.028, studio: 0.1 },     // first guess pot .5 / Vault .4 (same reason)
+    caughtTo: { pot: 0.876, vault: 0.024, studio: 0.1 },     // first guess pot .5 / Vault .4 (same reason)
     droppedAmberToPicker: 0.5,                   // the other half goes to the Vault (stops relays)
     vaultPieceShare: 0.1,                        // a Vault piece is worth a tenth of the Vault
     seedVault: 0,
