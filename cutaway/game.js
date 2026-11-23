@@ -597,7 +597,15 @@
       }
       this.bag = []; this.inShift = false; this.oil = S.oilStart;   // the bag goes back to flat
       const m = mineralText(mins);
-      if (sats || m) this.say('Banked ' + [sats ? sats + ' sats' : '', m].filter(Boolean).join(' · '), 3);
+      if (sats || m) {
+        this.say('Banked ' + [sats ? sats + ' sats' : '', m].filter(Boolean).join(' · '), 3);
+        // the haul floats up from the hatch, and the Banked counter lights up
+        const plus = [sats ? '+' + sats + ' sats' : '', ...Object.entries(mins).map(([k, v]) => '+' + v + ' ' + k)].filter(Boolean).join(' · ');
+        const hx = this.mine.G.colX(this.mine.c0), hy = -S.minerHeight * 1.3;
+        const t = this.add.text(hx, hy, plus, { fontFamily: FONT, fontSize: '42px', fontStyle: '600', color: '#ffd28a', stroke: '#000', strokeThickness: 8 }).setOrigin(0.5).setScale(1 / 3).setDepth(Z.fx);
+        this.tweens.add({ targets: t, y: hy - 30, alpha: 0, duration: 1800, ease: 'Sine.easeOut', onComplete: () => t.destroy() });
+        const v = $('vaultCell'); v.classList.remove('flash'); void v.offsetWidth; v.classList.add('flash');
+      }
     }
     bagWeight() { return this.bag.reduce((a, b) => a + b.weight, 0); }
     bagSats() { return this.bag.reduce((a, b) => a + b.sats, 0); }
@@ -769,6 +777,7 @@
       // two numbers: sats from Bitcoin ore, and minerals by kind
       this.set('bagSats', String(this.bagSats()));
       this.set('bag', (mineralText(this.bagMinerals()) || 'no minerals') + (w >= S.bagCapacity ? ' · full' : ''));
+      { const rv = records.get(); this.set('vaultSats', String(rv.totalPoints)); this.set('vault', mineralText(rv.minerals || {}) || 'no minerals'); }   // banked so far
       const r = records.get(), firstShift = r.shifts < S.keysHintShifts || (r.shifts === S.keysHintShifts && this.inShift);
       $('keys').style.display = firstShift ? '' : 'none';
       const mean = TEST ? S.testBlockSeconds : S.averageBlockSeconds, secs = this.climbOutSeconds();
