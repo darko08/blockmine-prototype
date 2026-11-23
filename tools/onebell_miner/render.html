@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>One Bell miner sprites</title>
+<!-- Renders One Bell's miner sprite sheets from the 3D version's own models and animations (3d/models).
+     Run: node tools/onebell_miner/render.js (it serves the repo, opens this page headless and writes onebell/assets/miner). -->
+<script type="importmap">{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+</head>
+<body style="margin:0;background:#333">
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+
+const FRAMES = 12, PX = 256;
+const H = 54;                                  // his height in the 3D game's units
+// the same attachment numbers as 3d/game3d.js
+const V = { lampSize: 0.16, lampHook: [0.04, 0.02, 0.15], pickLength: 0.48, bagBack: 0.0, bagUp: 0.17, bagLean: -0.38 };
+const CAM_SIDE = 0.62;                         // the camera: behind him, this far round to his right, so the belt lamp shows
+
+const loader = new GLTFLoader();
+const load = (n) => new Promise((res, rej) => loader.load('../../3d/models/' + n + '.glb', res, undefined, rej));
+const [miner, lantern, pick, bagE, bagH, bagF] = await Promise.all(['miner', 'lantern', 'pick', 'bag_empty', 'bag_half', 'bag_full'].map(load));
+
+function place(model, h) {
+  const o = model.scene.clone(true), size = new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3());
+  o.scale.setScalar(h / size.y); return o;
+}
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(PX * 2, PX * 2);   // rendered at 2x, scaled down when the sheet is drawn
+renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.7;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.add(new THREE.HemisphereLight(0xe0c8a8, 0x2a1a0c, 1.4));
+const key = new THREE.DirectionalLight(0xffe0b8, 1.6); scene.add(key); scene.add(key.target);
+const lampLight = new THREE.PointLight(0xffb060, 900, H * 2.2, 1.6); scene.add(lampLight);
+
+const root = new THREE.Group(); scene.add(root);
+const body = SkeletonUtils.clone(miner.scene); root.add(body);
+body.traverse((m) => { if (m.isMesh) m.frustumCulled = false; });
+{ body.updateMatrixWorld(true); const box = new THREE.Box3().setFromObject(body), k = H / (box.max.y - box.min.y);
+  body.scale.setScalar(k); body.position.y = -box.min.y * k; }
+const mixer = new THREE.AnimationMixer(body);
+const clips = Object.fromEntries(miner.animations.map((c) => [c.name, c]));
+const bone = (n) => body.getObjectByName('mixamorig' + n) || body.getObjectByName('mixamorig:' + n);
+const B = { hips: bone('Hips'), hand: bone('RightHand'), lhand: bone('LeftHand'), chest: bone('Spine2'), lsh: bone('LeftShoulder'), rsh: bone('RightShoulder') };
+
+const lampPivot = new THREE.Group(); root.add(lampPivot);
+const lamp = place(lantern, H * V.lampSize); lamp.position.y = -H * V.lampSize; lampPivot.add(lamp);
+lamp.traverse((m) => { if (m.isMesh) { m.material = m.material.clone(); m.material.emissive = new THREE.Color(0xffd6a0); m.material.emissiveMap = m.material.map; m.material.emissiveIntensity = 0.9; } });
+const glass = new THREE.Object3D(); glass.position.y = -H * V.lampSize * 0.58; lampPivot.add(glass);
+const pickG = new THREE.Group(); pickG.matrixAutoUpdate = false; root.add(pickG);
+{ const p = pick.scene.clone(true); p.scale.setScalar(H * V.pickLength); p.rotation.x = Math.PI / 2; pickG.add(p); }
+const bags = {};
+for (const [k, m, h] of [['empty', bagE, 0.46], ['half', bagH, 0.5], ['full', bagF, 0.56]]) {
+  const holder = new THREE.Group(), o = place(m, H * h); o.rotation.y = -Math.PI / 2; o.position.y = -H * h;
+  holder.add(o); holder.visible = false; holder.rotation.order = 'YXZ'; root.add(holder); bags[k] = holder;
+  if (k !== 'empty') o.traverse((mm) => { if (mm.isMesh) { mm.material = mm.material.clone(); mm.material.emissive = new THREE.Color(0xffa040); mm.material.emissiveMap = mm.material.map; mm.material.emissiveIntensity = 0.12; } });
+}
+
+const up = new THREE.Vector3(0, 1, 0);
+const at = (b) => { const p = new THREE.Vector3(); b.getWorldPosition(p); return p; };
+// pose the skeleton at time t of a clip, then hang the lamp, the bag and the pick on it (as 3d/game3d.js does)
+function pose(clipName, t, opts) {
+  mixer.stopAllAction();
+  const a = mixer.clipAction(clips[clipName]); a.reset(); a.play(); a.setEffectiveWeight(1);
+  mixer.setTime(t);
+  root.updateMatrixWorld(true);
+  const face = new THREE.Vector3().subVectors(at(B.lsh), at(B.rsh)).cross(up); face.y = 0; face.normalize();
+  const right = new THREE.Vector3().crossVectors(face, up), yaw = Math.atan2(-face.z, face.x);
+  // lamp on his belt hook
+  const hp = at(B.hips);
+  lampPivot.position.copy(hp).addScaledVector(face, H * V.lampHook[0]).addScaledVector(up, H * V.lampHook[1]).addScaledVector(right, H * V.lampHook[2]);
+  lampPivot.rotation.set(0, yaw, opts.lampSwing || 0, 'YXZ');
+  // bag on his back
+  for (const k in bags) bags[k].visible = k === opts.bag;
+  if (opts.bag) { const c = at(B.chest), b = bags[opts.bag]; b.position.copy(c).addScaledVector(face, -H * V.bagBack).addScaledVector(up, H * V.bagUp); b.rotation.set(0, yaw, V.bagLean); }
+  // pick: in his right fist while swinging, across his back on the ladder
+  const hand = at(B.hand), hq = new THREE.Quaternion(); B.hand.getWorldQuaternion(hq);
+  if (opts.swing) {
+    const y = new THREE.Vector3(0, 0, -1).applyQuaternion(hq), fingers = new THREE.Vector3(0, 1, 0).applyQuaternion(hq);
+    const x = new THREE.Vector3().crossVectors(right, y); if (x.lengthSq() < 1e-4) x.copy(fingers); x.normalize();
+    const z = new THREE.Vector3().crossVectors(x, y);
+    pickG.matrix.makeBasis(x, y, z).setPosition(hand.clone().addScaledVector(fingers, H * 0.035));
+  } else {
+    const c = at(B.chest), sy = up.clone().multiplyScalar(0.85).addScaledVector(right, -0.5).normalize();
+    const sx = new THREE.Vector3().crossVectors(sy, face).normalize(), sz = new THREE.Vector3().crossVectors(sx, sy);
+    pickG.matrix.makeBasis(sx, sy, sz).setPosition(c.addScaledVector(face, -H * 0.17).addScaledVector(up, -H * 0.3).addScaledVector(right, H * 0.1));
+  }
+  pickG.matrixWorldNeedsUpdate = true;
+  root.updateMatrixWorld(true);
+  const g = new THREE.Vector3(); glass.getWorldPosition(g);
+  lampLight.position.copy(g);
+  return { face, right };
+}
+
+// the camera: fixed for every sheet so the frames line up. It looks the way he faces on the ladder, from behind him
+// and a little round to his right, and frames the same box every time.
+pose('climb', 0, { bag: 'half' });
+const ladderFace = new THREE.Vector3().subVectors(at(B.lsh), at(B.rsh)).cross(up).setY(0).normalize();
+const ladderRight = new THREE.Vector3().crossVectors(ladderFace, up);
+const camDir = ladderFace.clone().multiplyScalar(Math.cos(CAM_SIDE)).addScaledVector(ladderRight, -Math.sin(CAM_SIDE)).normalize(); // looking direction
+const hipsC = at(B.hips);
+const FRAME_H = H * 1.08, CY = H * 0.62;
+const cam = new THREE.OrthographicCamera(-FRAME_H / 2, FRAME_H / 2, FRAME_H / 2, -FRAME_H / 2, 1, 1000);
+const target = new THREE.Vector3(hipsC.x, CY, hipsC.z);
+cam.position.copy(target).addScaledVector(camDir, -300).addScaledVector(up, 40);
+cam.lookAt(target);
+const camRight = new THREE.Vector3().crossVectors(camDir, up).normalize();
+key.position.copy(target).addScaledVector(camDir, -100).addScaledVector(ladderRight, 120).addScaledVector(up, 160); key.target.position.copy(target);
+
+function project(v) { const p = v.clone().project(cam); return [+((p.x + 1) / 2 * PX).toFixed(1), +((1 - p.y) / 2 * PX).toFixed(1)]; }
+
+// the sheets
+const SHEETS = [
+  { name: 'climb_down', clip: 'climb', reverse: true, bag: 'empty' },
+  { name: 'climb_up', clip: 'climb', bag: 'half' },
+  { name: 'climb_up_heavy', clip: 'climb', bag: 'full' },
+  { name: 'swing_right', clip: 'swing', swing: true, bag: 'half', turn: -1.15 },   // turned to the wall on his right
+];
+const out = {}, meta = { frames: FRAMES, size: PX, camera: 'behind him, ' + Math.round(CAM_SIDE * 57.3) + ' degrees round to his right', sheets: {} };
+for (const s of SHEETS) {
+  const sheet = document.createElement('canvas'); sheet.width = PX * FRAMES; sheet.height = PX;
+  const g = sheet.getContext('2d'); g.imageSmoothingQuality = 'high';
+  const dur = clips[s.clip].duration, m = [];
+  root.rotation.y = s.turn || 0;
+  // centre this sheet on his pose (the scale stays the same for every sheet, so he never changes size)
+  let cy = 0, cx = 0;
+  for (let f = 0; f < FRAMES; f++) {
+    pose(s.clip, (f / FRAMES) * dur * 0.999, { bag: s.bag, swing: s.swing });
+    const bb = new THREE.Box3().setFromObject(body).union(new THREE.Box3().setFromObject(bags[s.bag]));
+    const c = bb.getCenter(new THREE.Vector3()); cy += c.y / FRAMES; cx += c.dot(camRight) / FRAMES;
+  }
+  const tgt = target.clone().setY(cy).addScaledVector(camRight, cx - target.dot(camRight));
+  cam.position.copy(tgt).addScaledVector(camDir, -300).addScaledVector(up, 40); cam.lookAt(tgt); cam.updateMatrixWorld(true);
+  for (let f = 0; f < FRAMES; f++) {
+    const u = f / FRAMES, t = (s.reverse ? 1 - u : u) * dur * (s.swing ? 0.999 : 1);
+    pose(s.clip, s.swing ? f / (FRAMES - 1) * dur * 0.999 : t, { bag: s.bag, swing: s.swing, lampSwing: s.swing ? 0 : Math.sin(u * Math.PI * 2) * 0.08 });
+    renderer.render(scene, cam);
+    g.drawImage(renderer.domElement, f * PX, 0, PX, PX);
+    const gl = new THREE.Vector3(); glass.getWorldPosition(gl);
+    m.push({ lhand: project(at(B.lhand)), rhand: project(at(B.hand)), lamp: project(gl) });
+  }
+  root.rotation.y = 0;
+  out[s.name] = sheet.toDataURL('image/png');
+  meta.sheets[s.name] = { clip: s.clip, reversed: !!s.reverse, bag: s.bag, frames: m };
+}
+window.__result = { out, meta, clips: Object.keys(clips) };
+</script>
+</body>
+</html>
