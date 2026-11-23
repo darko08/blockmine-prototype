@@ -17,7 +17,7 @@ const FRAMES = 12, PX = 256;
 const H = 54;                                  // his height in the 3D game's units
 // the same attachment numbers as 3d/game3d.js
 const V = { lampSize: 0.16, lampHook: [0.04, 0.02, 0.15], pickLength: 0.48, bagBack: 0.0, bagUp: 0.17, bagLean: -0.38 };
-const CAM_SIDE = 0.62;                         // the camera: behind him, this far round to his right, so the belt lamp shows
+const CAM_SIDE = 0.3;                         // the camera: behind him, this far round to his right, so the belt lamp shows
 
 const loader = new GLTFLoader();
 const load = (n) => new Promise((res, rej) => loader.load('../../3d/models/' + n + '.glb', res, undefined, rej));
@@ -48,29 +48,39 @@ body.traverse((m) => { if (m.isMesh) m.frustumCulled = false; });
 const mixer = new THREE.AnimationMixer(body);
 const clips = Object.fromEntries(miner.animations.map((c) => [c.name, c]));
 const bone = (n) => body.getObjectByName('mixamorig' + n) || body.getObjectByName('mixamorig:' + n);
-const B = { hips: bone('Hips'), hand: bone('RightHand'), lhand: bone('LeftHand'), chest: bone('Spine2'), lsh: bone('LeftShoulder'), rsh: bone('RightShoulder') };
+const B = { neck: bone('Neck'), hips: bone('Hips'), hand: bone('RightHand'), lhand: bone('LeftHand'), chest: bone('Spine2'), lsh: bone('LeftShoulder'), rsh: bone('RightShoulder') };
 
-const lampPivot = new THREE.Group(); root.add(lampPivot);
+const lampPivot = new THREE.Group(); scene.add(lampPivot);
 const lamp = place(lantern, H * V.lampSize); lamp.position.y = -H * V.lampSize; lampPivot.add(lamp);
 lamp.traverse((m) => { if (m.isMesh) { m.material = m.material.clone(); m.material.emissive = new THREE.Color(0xffd6a0); m.material.emissiveMap = m.material.map; m.material.emissiveIntensity = 0.9; } });
 const glass = new THREE.Object3D(); glass.position.y = -H * V.lampSize * 0.58; lampPivot.add(glass);
-const pickG = new THREE.Group(); pickG.matrixAutoUpdate = false; root.add(pickG);
+const pickG = new THREE.Group(); pickG.matrixAutoUpdate = false; scene.add(pickG);
 { const p = pick.scene.clone(true); p.scale.setScalar(H * V.pickLength); p.rotation.x = Math.PI / 2; pickG.add(p); }
 const bags = {};
 for (const [k, m, h] of [['empty', bagE, 0.46], ['half', bagH, 0.5], ['full', bagF, 0.56]]) {
   const holder = new THREE.Group(), o = place(m, H * h); o.rotation.y = -Math.PI / 2; o.position.y = -H * h;
-  holder.add(o); holder.visible = false; holder.rotation.order = 'YXZ'; root.add(holder); bags[k] = holder;
+  holder.add(o); holder.visible = false; holder.rotation.order = 'YXZ'; scene.add(holder); bags[k] = holder;
   if (k !== 'empty') o.traverse((mm) => { if (mm.isMesh) { mm.material = mm.material.clone(); mm.material.emissive = new THREE.Color(0xffa040); mm.material.emissiveMap = mm.material.map; mm.material.emissiveIntensity = 0.12; } });
 }
 
 const up = new THREE.Vector3(0, 1, 0);
 const at = (b) => { const p = new THREE.Vector3(); b.getWorldPosition(p); return p; };
 // pose the skeleton at time t of a clip, then hang the lamp, the bag and the pick on it (as 3d/game3d.js does)
+// opts.face: the way he should face (horizontal); opts.upright: turn him (about his hips) so his spine is vertical
 function pose(clipName, t, opts) {
   mixer.stopAllAction();
+  root.quaternion.identity(); root.position.set(0, 0, 0);
   const a = mixer.clipAction(clips[clipName]); a.reset(); a.play(); a.setEffectiveWeight(1);
   mixer.setTime(t);
   root.updateMatrixWorld(true);
+  const hips0 = at(B.hips), q = new THREE.Quaternion();
+  if (opts.upright) q.setFromUnitVectors(new THREE.Vector3().subVectors(at(B.neck), hips0).normalize(), up);
+  root.quaternion.copy(q); root.updateMatrixWorld(true);
+  if (opts.face) {
+    const f0 = new THREE.Vector3().subVectors(at(B.lsh), at(B.rsh)).cross(up).setY(0).normalize();
+    root.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(f0, opts.face)); root.updateMatrixWorld(true);
+  }
+  root.position.add(hips0.clone().sub(at(B.hips))); root.updateMatrixWorld(true);
   const face = new THREE.Vector3().subVectors(at(B.lsh), at(B.rsh)).cross(up); face.y = 0; face.normalize();
   const right = new THREE.Vector3().crossVectors(face, up), yaw = Math.atan2(-face.z, face.x);
   // lamp on his belt hook
@@ -101,15 +111,15 @@ function pose(clipName, t, opts) {
 
 // the camera: fixed for every sheet so the frames line up. It looks the way he faces on the ladder, from behind him
 // and a little round to his right, and frames the same box every time.
-pose('climb', 0, { bag: 'half' });
-const ladderFace = new THREE.Vector3().subVectors(at(B.lsh), at(B.rsh)).cross(up).setY(0).normalize();
+const ladderFace = new THREE.Vector3(0, 0, 1);   // on the ladder he faces it, straight away from the camera
+pose('climb', 0, { bag: 'half', upright: true, face: ladderFace });
 const ladderRight = new THREE.Vector3().crossVectors(ladderFace, up);
 const camDir = ladderFace.clone().multiplyScalar(Math.cos(CAM_SIDE)).addScaledVector(ladderRight, -Math.sin(CAM_SIDE)).normalize(); // looking direction
 const hipsC = at(B.hips);
-const FRAME_H = H * 1.08, CY = H * 0.62;
+const FRAME_H = H * 1.3, CY = H * 0.62;
 const cam = new THREE.OrthographicCamera(-FRAME_H / 2, FRAME_H / 2, FRAME_H / 2, -FRAME_H / 2, 1, 1000);
 const target = new THREE.Vector3(hipsC.x, CY, hipsC.z);
-cam.position.copy(target).addScaledVector(camDir, -300).addScaledVector(up, 40);
+cam.position.copy(target).addScaledVector(camDir, -300);   // level: the camera at his height
 cam.lookAt(target);
 const camRight = new THREE.Vector3().crossVectors(camDir, up).normalize();
 key.position.copy(target).addScaledVector(camDir, -100).addScaledVector(ladderRight, 120).addScaledVector(up, 160); key.target.position.copy(target);
@@ -123,30 +133,30 @@ const SHEETS = [
   { name: 'climb_up_heavy', clip: 'climb', bag: 'full' },
   { name: 'swing_right', clip: 'swing', swing: true, bag: 'half', turn: -1.15 },   // turned to the wall on his right
 ];
-const out = {}, meta = { frames: FRAMES, size: PX, camera: 'behind him, ' + Math.round(CAM_SIDE * 57.3) + ' degrees round to his right', sheets: {} };
+// climbing: facing the ladder; swinging: turned towards the wall on his right
+const faceOf = (s) => (s.turn ? ladderFace.clone().applyAxisAngle(up, s.turn) : ladderFace);
+const out = {}, meta = { frameHeightInHisHeights: FRAME_H / H, frames: FRAMES, size: PX, camera: 'behind him, ' + Math.round(CAM_SIDE * 57.3) + ' degrees round to his right', sheets: {} };
 for (const s of SHEETS) {
   const sheet = document.createElement('canvas'); sheet.width = PX * FRAMES; sheet.height = PX;
   const g = sheet.getContext('2d'); g.imageSmoothingQuality = 'high';
   const dur = clips[s.clip].duration, m = [];
-  root.rotation.y = s.turn || 0;
   // centre this sheet on his pose (the scale stays the same for every sheet, so he never changes size)
   let cy = 0, cx = 0;
   for (let f = 0; f < FRAMES; f++) {
-    pose(s.clip, (f / FRAMES) * dur * 0.999, { bag: s.bag, swing: s.swing });
+    pose(s.clip, (f / FRAMES) * dur * 0.999, { bag: s.bag, swing: s.swing, upright: !s.swing, face: faceOf(s) });
     const bb = new THREE.Box3().setFromObject(body).union(new THREE.Box3().setFromObject(bags[s.bag]));
     const c = bb.getCenter(new THREE.Vector3()); cy += c.y / FRAMES; cx += c.dot(camRight) / FRAMES;
   }
   const tgt = target.clone().setY(cy).addScaledVector(camRight, cx - target.dot(camRight));
-  cam.position.copy(tgt).addScaledVector(camDir, -300).addScaledVector(up, 40); cam.lookAt(tgt); cam.updateMatrixWorld(true);
+  cam.position.copy(tgt).addScaledVector(camDir, -300); cam.lookAt(tgt); cam.updateMatrixWorld(true);
   for (let f = 0; f < FRAMES; f++) {
     const u = f / FRAMES, t = (s.reverse ? 1 - u : u) * dur * (s.swing ? 0.999 : 1);
-    pose(s.clip, s.swing ? f / (FRAMES - 1) * dur * 0.999 : t, { bag: s.bag, swing: s.swing, lampSwing: s.swing ? 0 : Math.sin(u * Math.PI * 2) * 0.08 });
+    pose(s.clip, s.swing ? f / (FRAMES - 1) * dur * 0.999 : t, { bag: s.bag, swing: s.swing, upright: !s.swing, face: faceOf(s), lampSwing: s.swing ? 0 : Math.sin(u * Math.PI * 2) * 0.08 });
     renderer.render(scene, cam);
     g.drawImage(renderer.domElement, f * PX, 0, PX, PX);
     const gl = new THREE.Vector3(); glass.getWorldPosition(gl);
     m.push({ lhand: project(at(B.lhand)), rhand: project(at(B.hand)), lamp: project(gl) });
   }
-  root.rotation.y = 0;
   out[s.name] = sheet.toDataURL('image/png');
   meta.sheets[s.name] = { clip: s.clip, reversed: !!s.reverse, bag: s.bag, frames: m };
 }
