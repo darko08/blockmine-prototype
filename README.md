@@ -21,15 +21,18 @@ A single-player practice mine timed by the real Bitcoin chain. One web page, Pha
 
 ## One Bell (`/onebell/`)
 A separate mini-game: https://darko08.github.io/blockmine-prototype/onebell/ · test: add `?test=1`.
-- One ladder, 12 levels. Tap **GO DOWN** at the hatch; the miner goes down by himself (3 s a level) and stops at 12.
-- The bag fills every second: levels 1–3 give 1 point, 4–6 give 3, 7–9 give 8, 10–12 give 20.
-- Tap **CLIMB OUT** once (3 s a level back up). He cannot go back down: one decision per run. Reaching the hatch banks the bag.
-- The percentage is `1 - e^(-climbSeconds / 600)`, where climbSeconds is the time back to the hatch from where he is now.
+- One ladder with no floor. Tap **GO DOWN** at the hatch; the miner goes down by himself, 3 s a level, until you tap **CLIMB OUT** or the bell rings. Once he reaches the middle of the screen the shaft scrolls past him. Level marks are numbered without end.
+- One deposit per level on the wall beside the ladder, alternating sides. Passing a level he chips it by himself (a short swing; the deposit dims and crumbles and "+N" floats to the bag). Levels 1–3 copper (3), 4–6 ember (9), 7–9 moonstone (24), 10–12 blackglass (60); from 13 the four repeat, 3 levels each, and every zone is worth 60 more than the one before (120, 180, 240, …). From level 5, each level has a 1 in 8 chance of **bell gold** instead (5 times that level's value); it glimmers from up to 3 levels above. The mine comes from the block hash: the same for everyone in a block, new at every block.
+- Climbing takes 3 s a level + 1 s for every 200 points in the bag (from 400 points he climbs heavy). The percentage is `1 - e^(-climbSeconds / 600)` for the full climb from where he is, whole percent, up to 99%.
 - A real new Bitcoin block rings the bell (a recording, `onebell/assets/sounds/bell.mp3`, played once). If he is below the hatch the bag is lost. Every block starts a new round.
-- Streak (days in a row with a banked run) and Best (deepest level he got out from) stay in this browser. **M** mutes; Space/Enter is the button.
-- Music: the 3D version's tracks (`3d/music/`), one per point zone (levels 1–3, 4–6, 7–9, 10–12), crossfaded as he goes down, softer at the hatch. When the bell rings the music stops so the bell is heard alone, then comes back softly. **N** (or the note button) turns only the music off; **M** silences everything.
+- Under the clock: the last three blocks' times from the real block timestamps, newest first, and the average (mempool.space's average block time for the current difficulty period).
+- Streak (days in a row with a banked run) and Best (deepest level he got out from, no limit) stay in this browser. **M** mutes everything; **N** (or the note button) only the music; Space/Enter is the button.
+- Music: the 3D version's tracks (`3d/music/`), one per zone (levels 1–3, 4–6, 7–9, 10 and deeper), crossfaded, softer at the hatch; the bell stops it so the bell is heard alone.
+- Background: the top of `onebell/assets/shaft.png` once, then a strip from the middle of the shaft repeated, mirrored every second tile; the rock gets darker every 3 levels.
+- Miner: sprite sheets in `onebell/assets/miner/` rendered from the 3D version's model and animations (`3d/models`), seen from behind and a little to his right: climb down (the climb reversed), climb up, climb up heavy (full bag), swing left/right (one rendered, one mirrored). `miner.json` holds each frame's hand and lantern positions. Re-render with `node tools/onebell_miner/render.js`. The model has no stumble animation, so when the bell catches him the game holds his last frame with a jolt and a short slip.
+- Deposits: `onebell/assets/deposits/` (copper, ember, moonstone, blackglass, bellgold), cut from the Runway sheet (task b2279055). Their rock bases are tinted to the wall and faded at the edges in code.
+- The pick plays `onebell/assets/sounds/pick.mp3` if that recording is added; there is none yet, so the swing is silent.
 - Test mode (`?test=1`): a fake bell, random, about 60 s apart (the percentage uses that 60 s average), and its own record. TEST is shown on screen.
-- Files: `onebell/index.html`, `onebell/game.js`, `onebell/assets/shaft.png` (background, Runway task d06ecd10), `onebell/assets/sounds/bell.mp3` (first strike of the church bell recording). Uses `js/chain.js` and the miner art in `Assets/cutaway/`.
 
 ## Rope version (`/rope/`)
 - Hold on empty rock to go down; let go to climb. Press a node within lamp reach to stop there, then drag along its crack to swing.
