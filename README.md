@@ -27,6 +27,7 @@ A separate mini-game: https://darko08.github.io/blockmine-prototype/onebell/ · 
 - The percentage is `1 - e^(-climbSeconds / 600)`, where climbSeconds is the time back to the hatch from where he is now.
 - A real new Bitcoin block rings the bell (a recording, `onebell/assets/sounds/bell.mp3`, played once). If he is below the hatch the bag is lost. Every block starts a new round.
 - Streak (days in a row with a banked run) and Best (deepest level he got out from) stay in this browser. **M** mutes; Space/Enter is the button.
+- Music: the 3D version's tracks (`3d/music/`), one per point zone (levels 1–3, 4–6, 7–9, 10–12), crossfaded as he goes down, softer at the hatch. When the bell rings the music stops so the bell is heard alone, then comes back softly. **N** (or the note button) turns only the music off; **M** silences everything.
 - Test mode (`?test=1`): a fake bell, random, about 60 s apart (the percentage uses that 60 s average), and its own record. TEST is shown on screen.
 - Files: `onebell/index.html`, `onebell/game.js`, `onebell/assets/shaft.png` (background, Runway task d06ecd10), `onebell/assets/sounds/bell.mp3` (first strike of the church bell recording). Uses `js/chain.js` and the miner art in `Assets/cutaway/`.
 

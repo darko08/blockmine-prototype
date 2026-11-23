@@ -64,6 +64,7 @@
   }
   function ringBell() {
     bellFlashAt = performance.now();
+    Music.hush();                     // the bell is heard alone
     if (muted) return;
     try { bell.pause(); bell.currentTime = 0; bell.muted = false; const p = bell.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
   }
@@ -71,6 +72,45 @@
     muted = m;
     try { localStorage.setItem(MUTE_KEY, m ? '1' : '0'); } catch (e) {}
     if (m) { try { bell.pause(); } catch (e) {} }
+  }
+
+  // ---- music: the scored tracks from the 3D version (3d/music), one per point zone, crossfaded ----
+  // Levels 1-3, 4-6, 7-9 and 10-12 each have their own loop, darker the deeper; at the hatch the first plays softer.
+  // M silences everything; N (or the note button) silences only the music. When the bell rings the music stops,
+  // so the bell is heard alone, and comes back softly a few seconds after the bell has died away.
+  const MUSIC_KEY = 'onebell.music';
+  const Music = {
+    files: ['../3d/music/depth1.mp3', '../3d/music/depth2.mp3', '../3d/music/depth3.mp3', '../3d/music/depth4.mp3'],
+    volume: 0.5, hatch: 0.45, fade: 2.5,       // overall level; at the hatch the first track plays softer; seconds to cross
+    on: true, tracks: [], tryT: 0, holdUntil: 0,
+    bandOf(l) { return l <= 3 ? 0 : l <= 6 ? 1 : l <= 9 ? 2 : 3; },   // l: the level (0 = hatch)
+    track(i) {
+      if (!this.tracks[i]) { const a = new Audio(this.files[i]); a.loop = true; a.preload = 'auto'; a.volume = 0; this.tracks[i] = { a, v: 0 }; }
+      return this.tracks[i];
+    },
+    hush() {                                   // stop at once, then stay quiet through the bell and a little silence
+      this.holdUntil = performance.now() + 9000;
+      this.tracks.forEach((t) => { if (t) { t.v = 0; t.a.volume = 0; t.a.pause(); } });
+    },
+    update(dt, l) {
+      const band = this.bandOf(l), want = this.on && !muted && performance.now() >= this.holdUntil;
+      this.tryT -= dt;
+      for (let i = 0; i < this.files.length; i++) {
+        const target = want && i === band ? (l === 0 ? this.hatch : 1) : 0;
+        if (!target && !this.tracks[i]) continue;
+        const t = this.track(i);
+        t.v += (target - t.v) * Math.min(1, dt / this.fade * 3);
+        if (target === 0 && t.v < 0.005) { t.v = 0; if (!t.a.paused) t.a.pause(); }
+        t.a.volume = Math.max(0, Math.min(1, t.v * this.volume));
+        // browsers start sound only after a tap or a key: keep trying until one has happened
+        if (target > 0 && t.a.paused && this.tryT <= 0) { this.tryT = 1; const p = t.a.play(); if (p && p.catch) p.catch(() => {}); }
+      }
+    },
+  };
+  try { Music.on = localStorage.getItem(MUSIC_KEY) !== '0'; } catch (e) {}
+  function toggleMusic() {
+    Music.on = !Music.on; Music.tryT = 0;
+    try { localStorage.setItem(MUSIC_KEY, Music.on ? '1' : '0'); } catch (e) {}
   }
 
   // ---- state ----------------------------------------------------------------------------------
@@ -211,7 +251,7 @@
     return h ? h + ':' + String(m).padStart(2, '0') + ':' + ss : m + ':' + ss;
   }
 
-  let buttonRect = { x: 0, y: 0, w: 0, h: 0 }, muteRect = { x: 0, y: 0, w: 0, h: 0 };
+  let buttonRect = { x: 0, y: 0, w: 0, h: 0 }, muteRect = { x: 0, y: 0, w: 0, h: 0 }, musicRect = { x: 0, y: 0, w: 0, h: 0 };
 
   function minerPose(t) {
     if (state === 'hatch') {
@@ -227,9 +267,13 @@
     return { img, x, y, w, h, lx, ly };
   }
 
+  let lastFrame = performance.now();
   function draw() {
     advance();
-    const t = performance.now(), L = vx0, R = vx0 + VW, CX = IMG_W / 2;
+    const t = performance.now(), frameDt = Math.min(0.25, (t - lastFrame) / 1000);
+    lastFrame = t;
+    Music.update(frameDt, levelNow());
+    const L = vx0, R = vx0 + VW, CX = IMG_W / 2;
     ctx.setTransform(dpr * scale, 0, 0, dpr * scale, -vx0 * dpr * scale, 0);
     ctx.fillStyle = '#060403'; ctx.fillRect(0, 0, IMG_W, IMG_H);
     if (art.shaft.complete && art.shaft.naturalWidth) ctx.drawImage(art.shaft, 0, 0, IMG_W, IMG_H);
@@ -313,6 +357,9 @@
     const mx = R - 62, my = rowY + 32, ms = 52;
     muteRect = { x: mx - 14, y: my - 14, w: ms + 28, h: ms + 28 };
     drawSpeaker(mx, my, ms);
+    const nx = mx - 74;
+    musicRect = { x: nx - 14, y: my - 14, w: ms + 28, h: ms + 28 };
+    drawNote(nx, my, ms);
 
     // ---- LEVEL (left) and BAG (right)
     const lcx = (L + WALL_L) / 2 - 4, rcx = (WALL_R + R) / 2 + 4, sideW = Math.min(WALL_L - L, R - WALL_R) - 36;
@@ -400,17 +447,32 @@
     ctx.restore();
   }
 
+  function drawNote(x, y, s) {
+    ctx.save();
+    const k = s / 52;
+    ctx.globalAlpha = 0.85; ctx.strokeStyle = CREAM; ctx.fillStyle = 'rgba(239,230,210,.35)'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(x + 19 * k, y + 39 * k); ctx.lineTo(x + 19 * k, y + 12 * k); ctx.lineTo(x + 42 * k, y + 6 * k); ctx.lineTo(x + 42 * k, y + 33 * k); ctx.stroke();
+    [[14, 39], [37, 33]].forEach(([cx, cy]) => { ctx.beginPath(); ctx.arc(x + cx * k, y + cy * k, 5.5 * k, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); });
+    if (!Music.on) { ctx.beginPath(); ctx.moveTo(x + 4 * k, y + 4 * k); ctx.lineTo(x + 50 * k, y + 48 * k); ctx.stroke(); }
+    ctx.fillStyle = CREAM; ctx.font = '600 ' + Math.round(18 * k) + 'px ' + FONT; ctx.textAlign = 'center'; ctx.fillText('N', x + 26 * k, y + 70 * k);
+    ctx.restore();
+  }
+
   // ---- input ----------------------------------------------------------------------------------
   const inside = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
   canvas.addEventListener('pointerdown', (e) => {
     const b = canvas.getBoundingClientRect();
     const x = vx0 + (e.clientX - b.left) / scale, y = (e.clientY - b.top) / scale;
     if (inside(muteRect, x, y)) { unlockAudio(); setMuted(!muted); return; }
+    if (inside(musicRect, x, y)) { unlockAudio(); toggleMusic(); return; }
+    unlockAudio(); Music.tryT = 0;     // any tap lets the music start
     if (inside({ x: buttonRect.x - 10, y: buttonRect.y - 24, w: buttonRect.w + 20, h: buttonRect.h + 40 }, x, y)) { e.preventDefault(); press(); }
   });
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
-    if (e.key === 'm' || e.key === 'M') { unlockAudio(); setMuted(!muted); }
+    unlockAudio(); Music.tryT = 0;
+    if (e.key === 'm' || e.key === 'M') { setMuted(!muted); }
+    else if (e.key === 'n' || e.key === 'N') { toggleMusic(); }
     else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); press(); }
   });
 
