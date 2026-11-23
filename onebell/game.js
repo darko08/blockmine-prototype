@@ -8,20 +8,25 @@
   const IMG_W = 1088, IMG_H = 1920;
   const LADDER_X = 547;                 // centre between the two rails in shaft.png
   const HATCH_Y = 300;                  // the rim of the hatch, where the ladder starts
-  const GAP = 100;                      // one level, in painting pixels
+  const GAP = 170;                      // one level, in painting pixels (he is about 1.5 levels tall)
   const ANCHOR0 = 372;                  // his hands at the hatch: on the top rungs, head just under the bell
   const levelY = (d) => ANCHOR0 + d * GAP;   // world y of level d (his hands' mark)
-  const MID = 800;                      // once his hands reach this screen height he stays there and the shaft scrolls
+  const MID = 760;                      // once his hands reach this screen height he stays there and the shaft scrolls
+  const TOP_OFF = 70;                   // at the hatch the painting sits this much lower, under the top panel
   const WALL_L = 390, WALL_R = 695;     // the shaft walls near the top
   const BELL = { x: 547, y: 242 };
   const FADE_TOP = 1365, FADE_BOT = 1452; // the bottom panel fades in here, solid below (bottom quarter = 1440)
-  // endless background: the top of shaft.png once, then a strip from the middle of the shaft, mirrored every second tile
-  const TOP_END = 1000, STRIP_Y = 600, STRIP_H = 400;
+  // endless background: the top of shaft.png once (rows 0-1050), then rows 450-1050 repeated; the 200 rows below
+  // the strip fade in over the top of each tile, so every join is a blend
+  const TOP_END = 1050, STRIP_Y = 450, STRIP_H = 600, BLEND = 200;
+  const TOP_PANEL = 236;                // the near-black panel at the top: solid to here, then fading out
 
   // ---- the rules ------------------------------------------------------------------------------
   const BASE_SEC = 3;                   // seconds per level, going down, and climbing with an empty bag
   const SWING_SEC = 0.9, IMPACT = 0.45; // of each level's 3 s going down: the swing at the deposit, and when the pick lands
-  const climbPerLevel = (bag) => BASE_SEC + Math.floor(bag / 200);   // a heavy bag climbs slower: +1 s per 200 points
+  // a fuller bag climbs slower: +0.1 s a level for every deposit in it, never more than 6 s a level
+  const climbPerLevel = (count) => Math.min(6, BASE_SEC + 0.1 * count);
+  const HEAVY_AT = 20;                  // more deposits than this: the heavy climb
   const KINDS = ['copper', 'ember', 'moonstone', 'blackglass'];
   const zoneOf = (n) => Math.floor((n - 1) / 3);                     // levels 1-3 are zone 0, 4-6 zone 1, ...
   const kindOf = (n) => KINDS[zoneOf(n) % 4];
@@ -54,17 +59,17 @@
 
   // the miner: sprite sheets rendered from the 3D version's model and animations (tools/onebell_miner), 12 frames of 256 px
   const SHEETS = ['climb_down', 'climb_up', 'climb_up_heavy', 'swing_left', 'swing_right'];
-  const sheet = {}; SHEETS.forEach((n) => { sheet[n] = load('assets/miner/' + n + '.png?v=1'); });
+  const sheet = {}; SHEETS.forEach((n) => { sheet[n] = load('assets/miner/' + n + '.png?v=2'); });
   let minerMeta = null;
-  fetch('assets/miner/miner.json?v=1').then((r) => r.json()).then((m) => { minerMeta = m; }).catch(() => {});
-  const FRAME = 256, MINER_DRAW = 340;      // a frame is drawn this many painting pixels tall
+  fetch('assets/miner/miner.json?v=2').then((r) => r.json()).then((m) => { minerMeta = m; }).catch(() => {});
+  // a frame is drawn this many painting pixels tall: his figure (about 193 of a frame's 256 px) is 1.5 levels tall
+  const FRAME = 256, FIGURE_PX = 193, MINER_DRAW = Math.round(1.5 * GAP * FRAME / FIGURE_PX);
   const avg = (fs, key) => fs.reduce((a, f) => [a[0] + f[key][0] / fs.length, a[1] + f[key][1] / fs.length], [0, 0]);
   const handsOf = (fs) => fs.reduce((a, f) => [a[0] + (f.lhand[0] + f.rhand[0]) / 2 / fs.length, a[1] + (f.lhand[1] + f.rhand[1]) / 2 / fs.length], [0, 0]);
 
-  // deposits: five painted pieces, prepared once so each sits half-embedded in the wall
-  const WALL_RGB = [33, 23, 15];            // the wall's own colour beside the ladder in shaft.png
+  // deposits: five painted pieces, prepared once: full colour, the rock base's outer edge faded into the wall
   const deps = {};
-  ['copper', 'ember', 'moonstone', 'blackglass', 'bellgold'].forEach((k) => load('assets/deposits/' + k + '.png?v=1', (img) => { deps[k] = prepDeposit(img, k); }));
+  ['copper', 'ember', 'moonstone', 'blackglass', 'bellgold'].forEach((k) => load('assets/deposits/' + k + '.png?v=2', (img) => { deps[k] = prepDeposit(img, k); }));
   function boxBlur(src, w, h, r) {   // a box blur of a w x h map, horizontal then vertical
     const tmp = new Float32Array(w * h), out = new Float32Array(w * h);
     for (let y = 0; y < h; y++) { let acc = 0; const row = y * w;
@@ -96,13 +101,10 @@
       if (!a) continue;
       const r = px[i], g = px[i + 1], b = px[i + 2], V = Math.max(r, g, b) / 255;
       const m0 = mineralMap[y * w + x], mineral = Math.max(0, Math.min(1, (m0 - 0.3) / 0.35)), rock = 1 - mineral;
-      // a soft elliptical mask: the base fades out at its edges, as if it grows out of the wall
-      const ex = (x - w / 2) / (w / 2), ey = (y - h * 0.55) / (h * 0.55), rr = Math.sqrt(ex * ex + ey * ey);
-      const fade = Math.max(0, Math.min(1, (0.98 - rr) / 0.42));
-      const edge = rock * fade * fade + mineral * Math.max(fade, 0.9);
-      // tint the base to the wall, keeping its shading
-      const shade = Math.max(0.35, Math.min(1.7, V / 0.3)), t = 0.7 * rock;
-      px[i] = r * (1 - t) + WALL_RGB[0] * shade * t; px[i + 1] = g * (1 - t) + WALL_RGB[1] * shade * t; px[i + 2] = b * (1 - t) + WALL_RGB[2] * shade * t;
+      // full colour; only the outer edge of the rock base fades, so it sits in the wall (the crystals are untouched)
+      const ex = (x - w / 2) / (w / 2), ey = (y - h / 2) / (h / 2), rr = Math.sqrt(ex * ex + ey * ey);
+      const fade = Math.max(0, Math.min(1, (1.0 - rr) / 0.2));
+      const edge = 1 - rock * (1 - fade);
       px[i + 3] = a * edge;
       // the glow layer: the mineral only, brighter where it is bright
       const ga = a * mineral * edge * (kind === 'blackglass' ? 0.35 : Math.min(1, V * 1.4));
@@ -190,7 +192,7 @@
   let state = 'hatch';                  // 'hatch' | 'down' | 'up' | 'caught'
   let depth = 0;                        // in levels: 0 = hatch
   let seg = { kind: 'move', t: 0, from: 0 };   // going down: 'move' toward the next level, or 'swing' at a deposit
-  let bag = 0, deepest = 0;
+  let bag = 0, bagCount = 0, deepest = 0;   // points in the bag, and how many deposits
   let chipped = new Map();              // level -> time it was chipped (this run)
   let floats = [], bits = [];           // "+N" on its way to the bag; crumbs of a chipped deposit
   let caught = null;                    // { at, depth, frame, sheetName } while showing the moment the bell caught him
@@ -202,8 +204,9 @@
   let prevTimes = [], avgTime = null, testArrivals = [];
   const clockNow = () => (TEST && window.TestClock ? window.TestClock.now() : Date.now());
 
-  const levelNow = () => (state === 'hatch' || depth <= 0 ? 0 : Math.max(1, Math.floor(depth + 1e-6)));
-  const climbSeconds = () => depth * climbPerLevel(bag);
+  // the level he is on: going down, the last mark he reached; climbing, the mark he is leaving
+  const levelNow = () => (state === 'hatch' || depth <= 0 ? 0 : Math.max(1, state === 'up' ? Math.ceil(depth - 1e-6) : Math.floor(depth + 1e-6)));
+  const climbSeconds = () => depth * climbPerLevel(bagCount);
   const bellChance = () => Math.min(0.99, 1 - Math.exp(-climbSeconds() / MEAN_GAP));
 
   function say(big, small, ttl) { msg = { big, small: small || '', at: performance.now(), ttl: ttl || 9000 }; }
@@ -220,8 +223,8 @@
     const side = (n + firstSide) % 2 ? 1 : -1;                // alternating left and right
     d = {
       n, gold, side, kind: gold ? 'bellgold' : kindOf(n), value: valueOf(n) * (gold ? GOLD_X : 1),
-      x: (side < 0 ? 424 : 668) + (r() - 0.5) * 24, dy: 52 + (r() - 0.5) * 16,
-      scale: 0.92 + r() * 0.2, rot: (r() - 0.5) * 0.3, phase: r() * 6.28,
+      x: (side < 0 ? 448 : 646) + (r() - 0.5) * 14, dy: GAP * 0.5 + (r() - 0.5) * 16,
+      scale: 0.9 + r() * 0.1, rot: (r() - 0.5) * 0.2, phase: r() * 6.28,
       sparks: Array.from({ length: 5 }, () => [(r() - 0.5) * 0.7, (r() - 0.5) * 0.7, r() * 6.28, 0.6 + r() * 0.8]),
     };
     if (mineCache.size > 400) mineCache.clear();
@@ -243,14 +246,14 @@
         if (seg.kind === 'move') {
           const dur = seg.from === 0 ? BASE_SEC : BASE_SEC - SWING_SEC;
           depth = seg.from + Math.min(1, seg.t / dur);
-          if (seg.t >= dur) { depth = seg.from + 1; seg = { kind: 'swing', t: 0, at: depth, hit: false }; }
+          if (seg.t >= dur) { depth = seg.from + 1; seg = { kind: 'swing', t: seg.t - dur, at: depth, hit: false }; }   // the rest of this step carries on
         } else {
           if (!seg.hit && seg.t >= IMPACT) { seg.hit = true; chip(seg.at); }
-          if (seg.t >= SWING_SEC) seg = { kind: 'move', t: 0, from: seg.at };
+          if (seg.t >= SWING_SEC) seg = { kind: 'move', t: seg.t - SWING_SEC, from: seg.at };
         }
         deepest = Math.max(deepest, levelNow());
       } else if (state === 'up') {
-        depth = Math.max(0, depth - h / climbPerLevel(bag));
+        depth = Math.max(0, depth - h / climbPerLevel(bagCount));
         if (depth <= 0) { bank(); return; }
       }
     }
@@ -259,16 +262,16 @@
   function chip(n) {
     const d = deposit(n);
     chipped.set(n, performance.now());
-    bag += d.value;
+    bag += d.value; bagCount++;
     play(pickRec);
     floats.push({ v: d.value, x: d.x, wy: levelY(n) + d.dy, at: performance.now(), gold: d.gold });
     for (let i = 0; i < 16; i++) bits.push({ x: d.x + (Math.random() - 0.5) * 50, wy: levelY(n) + d.dy + (Math.random() - 0.5) * 40,
-      vx: (Math.random() - 0.5) * 120 - d.side * 40, vy: -60 - Math.random() * 120, s: 3 + Math.random() * 6, at: performance.now(),
+      vx: (Math.random() - 0.5) * 120 - d.side * 40, vy: -60 - Math.random() * 120, s: 4 + Math.random() * 7, at: performance.now(),
       c: d.gold ? '#f2c14a' : ['#6b4a2e', '#4a3220', '#8a6a48'][i % 3] });
   }
 
   function resetRun() {
-    state = 'hatch'; depth = 0; bag = 0; deepest = 0; seg = { kind: 'move', t: 0, from: 0 };
+    state = 'hatch'; depth = 0; bag = 0; bagCount = 0; deepest = 0; seg = { kind: 'move', t: 0, from: 0 };
     chipped = new Map(); floats = []; animT = 0;
   }
 
@@ -308,7 +311,7 @@
           'The bag is lost (' + lost.toLocaleString('en-US') + ' points).', 12000);
         // hold the moment: he stays where the bell caught him, then the new round starts at the hatch
         caught = { at: performance.now(), depth, sheet: lastSheet, frame: lastFrame };
-        state = 'caught'; bag = 0;
+        state = 'caught'; bag = 0; bagCount = 0;
       }
     } else if (!b.initial && !msg) {
       say('Block ' + b.height.toLocaleString('en-US') + ' found.', 'A new mine. The bell rings only for miners below.', 4000);
@@ -404,12 +407,30 @@
   }
   const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
-  // how dark the rock is at a world height: a little darker every 3 levels, down to almost black
+  // how dark the rock is outside the lamp at a world height: dim below the hatch, a little darker every 3 levels,
+  // never black (the lamp's circle cuts through it, see drawDark)
+  const LAMP_R = 430;
   function darkAt(wy) {
     const d = (wy - ANCHOR0) / GAP;
-    if (d < 3) return 0;
+    if (d < 0.3) return 0;
     const z = Math.floor(d / 3) + clamp01((d % 3) - 2);   // steps every 3 levels, eased over the last level of each
-    return 0.93 * (1 - Math.pow(0.84, z));
+    return clamp01(d - 0.3) * Math.min(0.82, 0.32 + 0.55 * (1 - Math.pow(0.84, z)));
+  }
+  const darkC = document.createElement('canvas'); darkC.width = IMG_W / 4; darkC.height = IMG_H / 4;
+  const dctx = darkC.getContext('2d');
+  function drawDark(lx, ly, flick) {
+    dctx.setTransform(0.25, 0, 0, 0.25, 0, 0);
+    dctx.globalCompositeOperation = 'source-over';
+    dctx.clearRect(0, 0, IMG_W, IMG_H);
+    for (let y = 0; y < FADE_BOT; y += 16) {
+      const a = darkAt(y + 8 + camY);
+      if (a > 0.005) { dctx.fillStyle = 'rgba(5,3,2,' + a.toFixed(3) + ')'; dctx.fillRect(0, y, IMG_W, 16); }
+    }
+    dctx.globalCompositeOperation = 'destination-out';   // the lamp's circle
+    const R = LAMP_R * 1.05 * flick, g = dctx.createRadialGradient(lx, ly, 0, lx, ly, R);
+    g.addColorStop(0, 'rgba(0,0,0,.95)'); g.addColorStop(0.5, 'rgba(0,0,0,.75)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    dctx.fillStyle = g; dctx.fillRect(lx - R, ly - R, R * 2, R * 2);
+    ctx.drawImage(darkC, 0, 0, IMG_W, IMG_H);
   }
 
   let buttonRect = { x: 0, y: 0, w: 0, h: 0 }, muteRect = { x: 0, y: 0, w: 0, h: 0 }, musicRect = { x: 0, y: 0, w: 0, h: 0 };
@@ -429,17 +450,16 @@
       f = Math.min(11, Math.floor(seg.t / SWING_SEC * 12));
     } else if (state === 'down') { name = 'climb_down'; f = Math.floor(animT * fps) % 12; }
     else {
-      name = bag > 400 ? 'climb_up_heavy' : 'climb_up';
-      f = Math.floor(animT * fps * BASE_SEC / climbPerLevel(bag)) % 12;
+      name = bagCount > HEAVY_AT ? 'climb_up_heavy' : 'climb_up';
+      f = Math.floor(animT * fps * BASE_SEC / climbPerLevel(bagCount)) % 12;
     }
     if (feed !== 'live' && state !== 'caught') f = lastFrame % 12;
     lastSheet = name; lastFrame = f;
     const k = MINER_DRAW / FRAME, M = minerMeta.sheets;
     const climbHands = handsOf(M.climb_down.frames), climbLamp = avg(M.climb_down.frames, 'lamp');
     const handY = levelY(depthNow) - camY + dy;
-    // across: his body on the ladder (between his hands and his lantern: seen from behind-right, his hands show to the
-    // left of his back); up and down: his hands on the level mark. The swing is lined up by his lantern's height.
-    const hd = handsOf(M[name].frames), lmp = avg(M[name].frames, 'lamp'), bodyX = (hd[0] + lmp[0]) / 2;
+    // his hands on the ladder at the level mark; the swing (turned to the wall) is lined up by his lantern's height
+    const hd = handsOf(M[name].frames), lmp = avg(M[name].frames, 'lamp'), bodyX = name.startsWith('swing') ? (hd[0] + lmp[0]) / 2 : hd[0];
     let x0 = LADDER_X - bodyX * k;
     const y0 = name.startsWith('swing') ? handY + (climbLamp[1] - climbHands[1]) * k - lmp[1] * k : handY - hd[1] * k;
     x0 += shake;
@@ -457,7 +477,7 @@
     const L = vx0, R = vx0 + VW, CX = IMG_W / 2;
 
     // the camera: follows his hands down to the middle of the screen, then the shaft scrolls past him
-    const want = state === 'caught' && caught ? Math.max(0, levelY(caught.depth) - MID) : Math.max(0, levelY(depth) - MID);
+    const want = Math.max(-TOP_OFF, levelY(state === 'caught' && caught ? caught.depth : depth) - MID);
     if (camEase) {
       const a = clamp01((t - camEase.at) / 1200), e = a * a * (3 - 2 * a);
       camY = camEase.from + (want - camEase.from) * e;
@@ -474,7 +494,7 @@
 
     // the bell flares when it rings (while the hatch is on screen)
     const sinceBell = (t - bellFlashAt) / 1000;
-    if (sinceBell < 5 && camY < HATCH_Y + 100) {
+    if (sinceBell < 5 && camY < HATCH_Y) {
       const a = Math.max(0, 1 - sinceBell / 5) * (0.75 + 0.25 * Math.sin(sinceBell * 9));
       ctx.save(); ctx.globalCompositeOperation = 'lighter';
       const by = BELL.y - camY, g = ctx.createRadialGradient(BELL.x, by, 0, BELL.x, by, 300);
@@ -489,12 +509,15 @@
     // deposits, one per level, alternating sides
     const lvlTop = Math.max(1, Math.floor((camY - 200 - ANCHOR0) / GAP)), lvlBot = Math.ceil((camY + FADE_BOT - ANCHOR0) / GAP) + 1;
     const here = state === 'caught' && caught ? Math.max(1, Math.floor(caught.depth + 1e-6)) : Math.max(0, Math.floor(depth + 1e-6));
-    for (let n = lvlTop; n <= lvlBot; n++) drawDeposit(deposit(n), t, lampX, lampY, here);
+    for (let n = lvlTop; n <= lvlBot; n++) drawDeposit(deposit(n), t, lampX, lampY, here, 'base');
+    // the dark of the deep: darker every 3 levels, but never inside the lamp's circle
+    drawDark(lampX, lampY, flick);
+    for (let n = lvlTop; n <= lvlBot; n++) drawDeposit(deposit(n), t, lampX, lampY, here, 'light');
 
-    // his lamp lights the rock around him
+    // his lamp lights the walls and the rock around him
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    const R1 = 340 * flick, g = ctx.createRadialGradient(lampX, lampY, 0, lampX, lampY, R1);
-    g.addColorStop(0, 'rgba(255,200,115,.62)'); g.addColorStop(0.15, 'rgba(255,165,60,.36)'); g.addColorStop(0.45, 'rgba(225,115,30,.13)'); g.addColorStop(1, 'rgba(200,90,20,0)');
+    const R1 = LAMP_R * flick, g = ctx.createRadialGradient(lampX, lampY, 0, lampX, lampY, R1);
+    g.addColorStop(0, 'rgba(255,200,115,.55)'); g.addColorStop(0.12, 'rgba(255,165,60,.32)'); g.addColorStop(0.45, 'rgba(225,115,30,.14)'); g.addColorStop(1, 'rgba(200,90,20,0)');
     ctx.fillStyle = g; ctx.fillRect(lampX - R1, lampY - R1, R1 * 2, R1 * 2);
     ctx.restore();
 
@@ -502,7 +525,7 @@
     const cur = state === 'caught' && caught ? Math.max(1, Math.floor(caught.depth + 1e-6)) : levelNow();
     for (let n = Math.max(1, lvlTop); n <= lvlBot; n++) {
       const y = levelY(n) - camY, on = n === cur;
-      if (y < -40 || y > FADE_BOT) continue;
+      if (y < TOP_PANEL - 40 || y > FADE_BOT) continue;
       ctx.save();
       shadow(on ? 18 : 6, on ? 'rgba(255,170,60,.9)' : 'rgba(0,0,0,.9)');
       ctx.strokeStyle = on ? AMBER_HI : 'rgba(214,190,150,.5)'; ctx.lineWidth = on ? 5 : 3;
@@ -516,6 +539,11 @@
     pg.addColorStop(0, 'rgba(6,4,3,0)'); pg.addColorStop(1, 'rgba(6,4,3,.97)');
     ctx.fillStyle = pg; ctx.fillRect(L, FADE_TOP, VW, FADE_BOT - FADE_TOP);
     ctx.fillStyle = 'rgba(6,4,3,.97)'; ctx.fillRect(L, FADE_BOT, VW, IMG_H - FADE_BOT);
+    // and the same at the top, so nothing scrolls behind the clock and the text
+    const tp = TOP_PANEL + safeTop, tg = ctx.createLinearGradient(0, tp, 0, tp + 70);
+    tg.addColorStop(0, 'rgba(6,4,3,.97)'); tg.addColorStop(1, 'rgba(6,4,3,0)');
+    ctx.fillStyle = 'rgba(6,4,3,.97)'; ctx.fillRect(L, 0, VW, tp);
+    ctx.fillStyle = tg; ctx.fillRect(L, tp, VW, 70);
 
     // the miner, and the hot core of his lamp
     if (pose && ready(pose.img)) {
@@ -548,7 +576,7 @@
       const cs = fmtClock(clockNow() - blockAt);
       text(cs, CX, clockY, clockPx, 'num700', CREAM, 'center', 1);
       // once the hatch has scrolled away, a small glowing bell beside the clock
-      if (camY > HATCH_Y - 40) drawBellIcon(CX - measure(cs, clockPx, 'num700', 1) / 2 - 46, clockY - clockPx * 0.36, t);
+      if (camY > HATCH_Y - 60) drawBellIcon(CX - measure(cs, clockPx, 'num700', 1) / 2 - 46, clockY - clockPx * 0.36, t);
       if (prevTimes.length) {
         const ps = 'previous ' + prevTimes.map(fmtClock).join(' · ') + (avgTime ? ' · average ' + fmtClock(avgTime) : '');
         text(ps, CX, prevY, fit(ps, prevPx, 'num500', VW - 70, 0.5), 'num500', 'rgba(205,192,168,.78)', 'center', 0.5);
@@ -616,53 +644,56 @@
   }
 
   // the shaft: the painting's top once, then a strip from its middle, mirrored every second tile so no seam shows
+  // the repeating tile: rows STRIP_Y..+STRIP_H, with the BLEND rows below them faded in over its top. Its top row
+  // continues the row above (TOP_END = STRIP_Y + STRIP_H), and its bottom row runs into the next tile's top.
+  let tile = null;
+  function makeTile() {
+    const c = document.createElement('canvas'); c.width = IMG_W; c.height = STRIP_H; const g = c.getContext('2d');
+    g.drawImage(shaft, 0, STRIP_Y, IMG_W, STRIP_H, 0, 0, IMG_W, STRIP_H);
+    const b = document.createElement('canvas'); b.width = IMG_W; b.height = BLEND; const bg = b.getContext('2d');
+    bg.drawImage(shaft, 0, STRIP_Y + STRIP_H, IMG_W, BLEND, 0, 0, IMG_W, BLEND);
+    bg.globalCompositeOperation = 'destination-in';
+    const gr = bg.createLinearGradient(0, 0, 0, BLEND); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    bg.fillStyle = gr; bg.fillRect(0, 0, IMG_W, BLEND);
+    g.drawImage(b, 0, 0);
+    return c;
+  }
   function drawShaft() {
     if (!ready(shaft)) return;
+    if (!tile) tile = makeTile();
     const top = 0 - camY;
-    if (top + TOP_END > 0) ctx.drawImage(shaft, 0, 0, IMG_W, TOP_END, 0, top, IMG_W, TOP_END);
+    if (top + TOP_END > 0) ctx.drawImage(shaft, 0, 0, IMG_W, TOP_END, 0, top, IMG_W, TOP_END + 0.5);
     const k0 = Math.max(0, Math.floor((camY - TOP_END) / STRIP_H)), k1 = Math.floor((camY + IMG_H - TOP_END) / STRIP_H);
-    for (let k = k0; k <= k1; k++) {
-      const y = TOP_END + k * STRIP_H - camY;
-      if (k % 2 === 0) {   // mirrored: it starts with the row the tile above ended on
-        ctx.save(); ctx.translate(0, y + STRIP_H); ctx.scale(1, -1);
-        ctx.drawImage(shaft, 0, STRIP_Y, IMG_W, STRIP_H, 0, 0, IMG_W, STRIP_H + 0.5);
-        ctx.restore();
-      } else ctx.drawImage(shaft, 0, STRIP_Y, IMG_W, STRIP_H, 0, y, IMG_W, STRIP_H + 0.5);
-    }
-    // darker every 3 levels
-    for (let y = 0; y < FADE_BOT; y += 12) {
-      const a = darkAt(y + 6 + camY);
-      if (a > 0.005) { ctx.fillStyle = 'rgba(4,3,2,' + a.toFixed(3) + ')'; ctx.fillRect(0, y, IMG_W, 12); }
-    }
+    for (let k = k0; k <= k1; k++) ctx.drawImage(tile, 0, TOP_END + k * STRIP_H - camY, IMG_W, STRIP_H + 0.5);
   }
 
-  function drawDeposit(d, t, lampX, lampY, here) {
+  // pass 'base': the picture itself, under the darkness; pass 'light': its glow in the lamp light, over the darkness
+  function drawDeposit(d, t, lampX, lampY, here, pass) {
     const art = deps[d.kind];
     if (!art) return;
     const cx = d.x, cy = levelY(d.n) + d.dy - camY;
-    if (cy < -120 || cy > FADE_BOT + 80) return;
-    const w = 104 * d.scale, h = w * art.h / art.w;
+    if (cy < -GAP || cy > FADE_BOT + GAP) return;
+    const h = GAP * 0.95 * d.scale, w = h * art.w / art.h;   // about one level tall
     const ch = chipped.get(d.n), sinceChip = ch ? (t - ch) / 1000 : -1;
-    const dist = Math.hypot(cx - lampX, cy - lampY), prox = Math.pow(clamp01(1 - dist / 360), 1.4);
-    const dark = darkAt(cy + camY);
+    const dist = Math.hypot(cx - lampX, cy - lampY), prox = Math.pow(clamp01(1 - dist / LAMP_R), 1.2);
     ctx.save();
     ctx.translate(cx, cy); ctx.rotate(d.rot);
-    if (d.side > 0) ctx.scale(-1, 1);              // the base grows out of the wall on its side
+    if (d.side > 0) ctx.scale(-1, 1);              // turned to grow out of the wall on its side
     const shrink = sinceChip >= 0 ? 1 - 0.18 * clamp01(sinceChip / 0.5) : 1;
     ctx.scale(shrink, shrink);
-    ctx.globalAlpha = sinceChip >= 0 ? 1 - 0.62 * clamp01(sinceChip / 0.5) : 1;
-    ctx.drawImage(art.base, -w / 2, -h / 2, w, h);
-    // darkened with the rock around it, less where the lamp reaches
-    const dim = Math.min(0.95, dark * (1 - prox * 0.7) + (sinceChip >= 0 ? 0.35 * clamp01(sinceChip / 0.5) : 0));
-    if (art.sil && dim > 0.01) { ctx.globalAlpha = dim; ctx.drawImage(art.sil, -w / 2, -h / 2, w, h); }
-    // it glows brighter as the lamp comes near (not once it is chipped)
-    if (art.glow && sinceChip < 0) {
+    if (pass === 'base') {
+      // chipped: it dims and crumbles
+      ctx.globalAlpha = sinceChip >= 0 ? 1 - 0.65 * clamp01(sinceChip / 0.5) : 1;
+      ctx.drawImage(art.base, -w / 2, -h / 2, w, h);
+    } else if (art.glow && sinceChip < 0) {
+      // in the lamp light it shines at full colour; outside it, only the darkness's dim view of it
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = (0.06 + 0.8 * prox) * (d.kind === 'bellgold' ? 1.2 : 1);
+      ctx.globalAlpha = 0.45 * prox * (d.kind === 'bellgold' ? 1.3 : 1);
       ctx.drawImage(art.glow, -w / 2, -h / 2, w, h);
-      if (art.rim) { ctx.globalAlpha = 0.35 + 0.6 * prox; ctx.drawImage(art.rim, -w / 2, -h / 2, w, h); }
+      if (art.rim) { ctx.globalAlpha = 0.25 + 0.6 * prox; ctx.drawImage(art.rim, -w / 2, -h / 2, w, h); }
     }
     ctx.restore();
+    if (pass === 'base') return;
     // bell gold glimmers, seen from up to 3 levels above it
     if (d.gold && sinceChip < 0 && d.n <= here + GOLD_SEEN) {
       ctx.save(); ctx.globalCompositeOperation = 'lighter';
@@ -688,7 +719,7 @@
     for (const b of bits) {
       b.vy += 420 * dt; b.x += b.vx * dt; b.wy += b.vy * dt;
       ctx.globalAlpha = clamp01(1 - (t - b.at) / 1300); ctx.fillStyle = b.c;
-      ctx.fillRect(b.x - b.s / 2, b.wy - camY - b.s / 2, b.s, b.s * 0.8);
+      ctx.beginPath(); ctx.ellipse(b.x, b.wy - camY, b.s / 2, b.s * 0.38, b.vx * 0.01, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
   }
