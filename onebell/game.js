@@ -1052,7 +1052,7 @@
     shadow(0);
     ctx.lineWidth = 4; ctx.strokeStyle = '#7a4a12'; ctx.stroke();
     roundRect(x + 9, y + 9, w - 18, h - 18, 32); ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,236,180,.55)'; ctx.stroke();
-    const px = fit(label, 112, 700, w - 90, 3);
+    const px = fit(label, Math.min(112, h * 0.75), 700, w - 90, 3);   // scaled to the button (the mine's are tall enough for 112)
     text(label, x + w / 2, y + h / 2 + px * 0.33, px, 700, '#22150a', 'center', 3);
     ctx.restore();
   }
