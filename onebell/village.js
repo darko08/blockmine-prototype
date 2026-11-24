@@ -30,7 +30,7 @@ window.makeVillage = function (G) {
   };
   const QUEUE_MAX = 5, COTTAGES_MAX = 4, ORDERS_MAX = 5, ORDER_GAP = 60e3, SKIP_AFTER = 180e3, TOWER_STAGES = 7;
   function buildCost(type) {
-    if (type === 'smelter') return { copper: 8 };
+    if (type === 'smelter') return { copper: 3 };   // one short run pays for it
     if (type === 'lampworks') return { bar: 6, ember: 6 };
     if (type === 'jeweller') return { bar: 10, lamp: 4, moonstone: 6 };
     if (type === 'glassworks') return { bar: 14, jewel: 4, blackglass: 6 };
@@ -43,6 +43,10 @@ window.makeVillage = function (G) {
     if (n >= 5) c.pane = n;
     return c;
   }
+  const ITEM_NAME = { copper: ['copper', 'copper'], ember: ['ember', 'ember'], moonstone: ['moonstone', 'moonstone'], blackglass: ['blackglass', 'blackglass'],
+    bellgold: ['bell gold', 'bell gold'], bar: ['copper bar', 'copper bars'], lamp: ['lamp', 'lamps'], jewel: ['jewel', 'jewels'], pane: ['pane', 'panes'], coins: ['coin', 'coins'] };
+  const itemName = (k, n) => n + ' ' + ITEM_NAME[k][n === 1 ? 0 : 1];
+  const RED = '#a01808', BROWN = '#2c1a08';   // on the parchment: what is missing, and what is there
   const BUILD_NAME = { smelter: 'Smelter', lampworks: 'Lamp works', jeweller: 'Jeweller', glassworks: 'Glassworks', cottage: 'Cottage' };
 
   // ---- saved state -------------------------------------------------------------------------------------------------
@@ -209,7 +213,7 @@ window.makeVillage = function (G) {
         continue;
       }
       if (!b) {   // an empty plot: a quiet "+" to build on it
-        const pulse = 0.55 + 0.25 * Math.sin(t / 500 + p.x);
+        const pulse = 0.78 + 0.22 * Math.sin(t / 700);   // all together, gently, never below half
         ctx.save(); ctx.globalAlpha = pulse; shadow(12, 'rgba(0,0,0,.8)');
         ctx.beginPath(); ctx.arc(p.x, p.y, 26, 0, Math.PI * 2); ctx.fillStyle = 'rgba(30,20,10,.55)'; ctx.fill();
         ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,214,150,.9)'; ctx.stroke();
@@ -223,20 +227,20 @@ window.makeVillage = function (G) {
       if (WORKSHOPS[b.type]) {
         const W = WORKSHOPS[b.type];
         if (b.ready > 0) {
-          const r = tag(p.x, g.y + 10, 'Ready' + (b.ready > 1 ? ' ×' + b.ready : ''), t, { bounce: true, glow: true });
+          const r = tag(p.x, g.y - 30, 'Ready' + (b.ready > 1 ? ' ×' + b.ready : ''), t, { bounce: true, glow: true });
           rects.push({ x: r.x - 10, y: r.y - 10, w: r.w + 20, h: r.h + 20, fn: () => collect(id) });
         } else if (b.queue > 0) {
           const left = b.start + W.secs * 1000 - Date.now();
-          tag(p.x, g.y + 10, fmtClock(Math.max(0, left) + 999) + (b.queue > 1 ? '  +' + (b.queue - 1) : ''), t);
+          tag(p.x, g.y - 30, fmtClock(Math.max(0, left) + 999) + (b.queue > 1 ? '  +' + (b.queue - 1) : ''), t);
         }
       }
     }
     drawDust(t);
 
     // ---- top: the counters, and the small line under them
-    const tg = ctx.createLinearGradient(0, 0, 0, 250);
+    const tg = ctx.createLinearGradient(0, 0, 0, 270);
     tg.addColorStop(0, 'rgba(8,6,4,.88)'); tg.addColorStop(0.7, 'rgba(8,6,4,.55)'); tg.addColorStop(1, 'rgba(8,6,4,0)');
-    ctx.fillStyle = tg; ctx.fillRect(L, 0, V.VW, 250);
+    ctx.fillStyle = tg; ctx.fillRect(L, 0, V.VW, 270);
     const top = 58 + V.safeTop, cells = [...ORES, 'coins'], cw = (V.VW - 40) / cells.length;
     cells.forEach((k, i) => {
       const cx = L + 20 + cw * (i + 0.5), n = have(k) - (pendingIn[k] || 0);
@@ -244,18 +248,20 @@ window.makeVillage = function (G) {
       drawItem(k, cx - cw * 0.22, top - 8, 56, n > 0 ? 1 : 0.4);
       shadow(8); text(fmtN(n), cx + cw * 0.04, top + 9, fit(fmtN(n), 48, 'num700', cw * 0.55), 'num700', n > 0 ? CREAM : 'rgba(239,230,210,.4)', 'left'); shadow(0);
     });
-    const gw = 150, gx0 = CX - gw * 2;
+    // the goods, the same size and brightness as the ores; dim only those the player cannot make yet (and has none of)
+    const canMake = new Set(Object.keys(WORKSHOPS).filter((k) => count(k) > 0).map((k) => WORKSHOPS[k].makes));
+    const gx0 = CX - cw * 2;
     GOODS.forEach((k, i) => {
-      const cx = gx0 + gw * (i + 0.5), n = have(k) - (pendingIn[k] || 0);
-      counterPos[k] = { x: cx - 30, y: top + 66 };
-      drawGood(k, cx - 30, top + 66, 44, n > 0 ? 1 : 0.4);
-      shadow(8); text(fmtN(n), cx - 2, top + 80, 40, 'num600', n > 0 ? CREAM : 'rgba(239,230,210,.4)', 'left'); shadow(0);
+      const cx = gx0 + cw * (i + 0.5), n = have(k) - (pendingIn[k] || 0), on = n > 0 || canMake.has(k);
+      counterPos[k] = { x: cx - cw * 0.22, y: top + 72 };
+      drawGood(k, cx - cw * 0.22, top + 72, 56, on ? 1 : 0.4);
+      shadow(8); text(fmtN(n), cx + cw * 0.04, top + 89, fit(fmtN(n), 48, 'num700', cw * 0.55), 'num700', on ? CREAM : 'rgba(239,230,210,.4)', 'left'); shadow(0);
     });
     const rec = G.rec, st = G.streak();
     const line = 'Streak ' + st + ' day' + (st === 1 ? '' : 's') + '   ·   Best: ' + (rec.best ? 'level ' + rec.best : '—') + '   ·   Score ' + fmtN(rec.banked || 0);
-    shadow(8); text(line, CX, top + 132, fit(line, 32, 600, V.VW - 60), 600, DIM, 'center'); shadow(0);
+    shadow(8); text(line, CX, top + 146, fit(line, 32, 600, V.VW - 60), 600, DIM, 'center'); shadow(0);
 
-    drawOrderCard(t, L + 22, top + 160);
+    drawOrderCard(t, L + 22, top + 172);
 
     // ---- bottom: the big button, and the block under it
     const blk = G.block(), live = blk.feed === 'live' && blk.height !== null;
@@ -276,56 +282,65 @@ window.makeVillage = function (G) {
   const fmtN = (n) => Math.max(0, n).toLocaleString('en-US');
 
   // ---- the order card (top left) ---------------------------------------------------------------------------------------
-  function drawOrderCard(t, x, y) {
-    const w = 310, h = 262;
+  // drawn at two thirds of its design size, so it does not crowd the top-left plot
+  const CARD_K = 0.67;
+  let cardAt = { x: 0, y: 0, w: 0, h: 0 };
+  function drawOrderCard(t, x0, y0) {
     if (orderIdx >= v.orders.length) orderIdx = 0;
     const o = v.orders[orderIdx];
-    ctx.save(); shadow(18, 'rgba(0,0,0,.7)');
-    roundRect(x, y, w, h, 14);
-    const g = ctx.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, '#efdcb2'); g.addColorStop(1, '#cdb07c');
+    if (!o) return;
+    const k = CARD_K, w = 310, h = o.wait ? 78 : 262;   // waiting: a small one-line card
+    const R = (rx, ry, rw, rh) => ({ x: x0 + rx * k, y: y0 + ry * k, w: rw * k, h: rh * k });   // card -> screen
+    cardAt = R(0, 0, w, h);
+    ctx.save(); ctx.translate(x0, y0); ctx.scale(k, k);
+    shadow(18, 'rgba(0,0,0,.7)');
+    roundRect(0, 0, w, h, 14);
+    const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#efdcb2'); g.addColorStop(1, '#cdb07c');
     ctx.fillStyle = g; ctx.fill(); shadow(0); ctx.lineWidth = 3; ctx.strokeStyle = '#6a4a1c'; ctx.stroke();
-    roundRect(x + 7, y + 7, w - 14, h - 14, 10); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(106,74,28,.5)'; ctx.stroke();
-    const ink = '#2c1a08', cx = x + w / 2;
-    if (!o) { ctx.restore(); return; }
+    roundRect(7, 7, w - 14, h - 14, 10); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(106,74,28,.5)'; ctx.stroke();
+    const ink = BROWN, cx = w / 2;
     if (o.wait) {
-      text('Next order', cx, y + 92, 36, 700, ink, 'center');
-      text('in ' + fmtClock(Math.max(0, o.wait - Date.now()) + 999), cx, y + 150, 42, 'num600', ink, 'center');
+      const s1 = 'Next order in ' + fmtClock(Math.max(0, o.wait - Date.now()) + 999);
+      text(s1, cx, 51, fit(s1, 36, 'num600', w - 30), 'num600', ink, 'center');
     } else {
       const nm = GOOD_NAME[o.good][o.n === 1 ? 0 : 1], title = 'Order: ' + o.n + ' ' + nm;
-      text(title, cx, y + 48, fit(title, 34, 700, w - 30), 700, ink, 'center');
-      drawGood(o.good, cx, y + 102, 60);
+      text(title, cx, 48, fit(title, 34, 700, w - 30), 700, ink, 'center');
+      drawGood(o.good, cx, 102, 60);
       const rw = 'Reward', rs = fmtN(o.reward);
-      text(rw, x + 26, y + 168, 30, 600, ink, 'left');
-      drawGood('coins', x + 26 + measure(rw, 30, 600) + 24, y + 158, 30);
-      text(rs, x + 26 + measure(rw, 30, 600) + 46, y + 169, 32, 'num700', ink, 'left');
-      const ok = have(o.good) >= o.n, fb = { x: x + 22, y: y + 190, w: w - 44 - (Date.now() - o.since > SKIP_AFTER ? 74 : 0), h: 52 };
+      text(rw, 26, 168, 30, 600, ink, 'left');
+      drawGood('coins', 26 + measure(rw, 30, 600) + 24, 158, 30);
+      text(rs, 26 + measure(rw, 30, 600) + 46, 169, 32, 'num700', ink, 'left');
+      const skip = Date.now() - o.since > SKIP_AFTER;
+      const ok = have(o.good) >= o.n, fb = { x: 22, y: 190, w: w - 44 - (skip ? 74 : 0), h: 52 };
       ctx.save(); ctx.globalAlpha = ok ? 1 : 0.45; shadow(ok ? 16 : 0, 'rgba(255,150,30,.6)');
       roundRect(fb.x, fb.y, fb.w, fb.h, 12);
       const bg = ctx.createLinearGradient(0, fb.y, 0, fb.y + fb.h); bg.addColorStop(0, '#ffcf6a'); bg.addColorStop(1, '#c97c1c');
       ctx.fillStyle = bg; ctx.fill(); shadow(0); ctx.lineWidth = 2.5; ctx.strokeStyle = '#7a4a12'; ctx.stroke();
-      text(ok ? 'FILL' : 'have ' + Math.min(have(o.good), o.n) + ' of ' + o.n, fb.x + fb.w / 2, fb.y + 36, ok ? 34 : 26, 700, '#22150a', 'center', ok ? 3 : 0);
+      text(ok ? 'FILL' : 'have ' + Math.min(have(o.good), o.n) + ' of ' + o.n, fb.x + fb.w / 2, fb.y + 36, ok ? 34 : 28, 700, '#22150a', 'center', ok ? 3 : 0);
       ctx.restore();
-      if (ok) rects.push({ ...fb, fn: () => fill(orderIdx) });
-      if (Date.now() - o.since > SKIP_AFTER) {
-        const sb = { x: x + w - 86, y: y + 190, w: 64, h: 52 };
-        text('skip', sb.x + sb.w / 2, sb.y + 34, 28, 600, '#5a3a14', 'center');
-        rects.push({ ...sb, fn: () => { v.orders[orderIdx] = newOrder(); save(); } });
+      if (ok) rects.push({ ...R(fb.x - 6, fb.y - 6, fb.w + 12, fb.h + 12), fn: () => fill(orderIdx) });
+      if (skip) {
+        const sb = { x: w - 86, y: 190, w: 64, h: 52 };
+        text('skip', sb.x + sb.w / 2, sb.y + 34, 30, 600, '#5a3a14', 'center');
+        rects.push({ ...R(sb.x, sb.y - 6, sb.w + 10, sb.h + 12), fn: () => { v.orders[orderIdx] = newOrder(); save(); } });
       }
     }
-    if (v.orders.length > 1) {   // more orders: ‹ 1/3 ›
-      const ps = (orderIdx + 1) + ' / ' + v.orders.length;
-      text(ps, cx, y + h + 34, 28, 'num600', CREAM, 'center');
-      text('‹', cx - 64, y + h + 36, 44, 700, CREAM, 'center'); text('›', cx + 64, y + h + 36, 44, 700, CREAM, 'center');
-      rects.push({ x: cx - 100, y: y + h + 4, w: 70, h: 50, fn: () => { orderIdx = (orderIdx + v.orders.length - 1) % v.orders.length; } });
-      rects.push({ x: cx + 30, y: y + h + 4, w: 70, h: 50, fn: () => { orderIdx = (orderIdx + 1) % v.orders.length; } });
-    }
     ctx.restore();
+    if (v.orders.length > 1) {   // more orders: ‹ 1/3 ›
+      const cxs = x0 + w * k / 2, yb = y0 + h * k;
+      shadow(8);
+      text((orderIdx + 1) + ' / ' + v.orders.length, cxs, yb + 32, 26, 'num600', CREAM, 'center');
+      text('‹', cxs - 56, yb + 34, 40, 700, CREAM, 'center'); text('›', cxs + 56, yb + 34, 40, 700, CREAM, 'center');
+      shadow(0);
+      rects.push({ x: cxs - 90, y: yb + 4, w: 64, h: 46, fn: () => { orderIdx = (orderIdx + v.orders.length - 1) % v.orders.length; } });
+      rects.push({ x: cxs + 26, y: yb + 4, w: 64, h: 46, fn: () => { orderIdx = (orderIdx + 1) % v.orders.length; } });
+    }
   }
   function fill(i) {
     const o = v.orders[i]; if (!o || o.wait || have(o.good) < o.n) return;
     v.goods[o.good] -= o.n; v.coins += o.reward;
     v.orders[i] = { wait: Date.now() + ORDER_GAP };
-    fly('coins', { x: 200, y: 400 }, Math.min(8, Math.ceil(o.reward / 40)), o.reward);
+    fly('coins', { x: cardAt.x + cardAt.w / 2, y: cardAt.y + cardAt.h * 0.6 }, Math.min(8, Math.ceil(o.reward / 40)), o.reward);   // to the coin counter
     save();
   }
 
@@ -392,16 +407,23 @@ window.makeVillage = function (G) {
   }
 
   // ---- menus -----------------------------------------------------------------------------------------------------------
-  function costRow(cost, x, y, size) {   // icons and amounts; the ones the player lacks in red
+  // icons and amounts: with haveNeed, "have / need" for each; what is missing in dark red, the rest in dark brown
+  function costRow(cost, x, y, size, haveNeed) {
     let cx = x;
     for (const k of Object.keys(cost)) {
       const lack = have(k) < cost[k];
       drawItem(k, cx + size / 2, y - size * 0.32, size);
-      const s = fmtN(cost[k]);
-      text(s, cx + size + 4, y, size * 0.8, 'num700', lack ? '#ff5a46' : '#2c1a08', 'left');
+      const s = haveNeed ? fmtN(have(k)) + ' / ' + fmtN(cost[k]) : fmtN(cost[k]);
+      text(s, cx + size + 4, y, size * 0.8, 'num700', lack ? RED : BROWN, 'left');
       cx += size + 14 + measure(s, size * 0.8, 'num700') + 18;
     }
     return cx;
+  }
+  // how many more of a workshop's goods the player can queue: what they can afford, up to the queue's room
+  function canQueue(b) {
+    const W = WORKSHOPS[b.type]; let n = 0;
+    while (b.queue + n < QUEUE_MAX && Object.keys(W.needs).every((k) => have(k) >= W.needs[k] * (n + 1))) n++;
+    return n;
   }
   function drawPanel(t, V) {
     const L = V.vx0, w = Math.min(V.VW - 40, 900), x = L + (V.VW - w) / 2;
@@ -421,7 +443,7 @@ window.makeVillage = function (G) {
       h = 130 + rows.length * 150 + 30;
     } else if (panel.kind === 'workshop') {
       const b = v.plots[panel.plot], W = WORKSHOPS[b.type];
-      title = W.name; h = 520;
+      title = W.name; h = 640;
     } else if (panel.kind === 'tower') {
       title = v.tower >= TOWER_STAGES ? 'The bell tower is complete' : 'Bell tower: stage ' + (v.tower + 1) + ' of 7';
       h = v.tower >= TOWER_STAGES ? 330 : 470;
@@ -448,7 +470,7 @@ window.makeVillage = function (G) {
         ctx.save(); if (!r.ok) ctx.globalAlpha = 0.75;
         text(BUILD_NAME[r.ty], x + 180, ry + 46, 38, 700, ink, 'left');
         text(r.done ? (r.ty === 'cottage' ? 'all 4 built' : 'built') : r.sub, x + w - 46, ry + 46, 26, 600, '#5a3a14', 'right');
-        if (!r.done) costRow(r.cost, x + 180, ry + 108, 36);
+        if (!r.done) costRow(r.cost, x + 180, ry + 108, 34, true);
         ctx.restore();
         if (r.ok) rects.push({ x: x + 24, y: ry, w: w - 48, h: rh, fn: r.fn });
       });
@@ -463,11 +485,23 @@ window.makeVillage = function (G) {
       text(fmtClock(W.secs * 1000) + ' each', x + w - 40, y + 210, 32, 'num600', '#5a3a14', 'right');
       const qs = 'In the queue: ' + b.queue + ' of ' + QUEUE_MAX + (b.queue ? '  ·  next in ' + fmtClock(b.start + W.secs * 1000 - Date.now() + 999) : '');
       text(qs, x + 40, y + 290, 32, 'num600', ink, 'left');
-      if (b.ready) text('Ready to collect: ' + b.ready, x + 40, y + 336, 32, 'num600', '#7a4a08', 'left');
-      const can = b.queue < QUEUE_MAX && affordable(W.needs);
-      const mb = { x: x + 40, y: y + h - 130, w: w - 80, h: 96 };
-      G.drawButton(mb.x, mb.y, mb.w, mb.h, b.queue >= QUEUE_MAX ? 'QUEUE FULL' : 'MAKE ONE', can);
-      if (can) rects.push({ ...mb, fn: () => queueOne(panel.plot) });
+      // the player's stock of the inputs and the output
+      const stock = 'You have: ' + [...Object.keys(W.needs), W.makes].map((k) => itemName(k, have(k))).join(', ');
+      text(stock, x + 40, y + 340, fit(stock, 32, 'num600', w - 80), 'num600', BROWN, 'left');
+      if (b.ready) text('Ready to collect: ' + b.ready, x + 40, y + 386, 32, 'num600', '#7a4a08', 'left');
+      const room = b.queue < QUEUE_MAX, nq = canQueue(b), can = room && nq > 0;
+      if (room && !nq) {   // cannot afford one: what is missing
+        const miss = Object.keys(W.needs).filter((k) => have(k) < W.needs[k]).map((k) => itemName(k, W.needs[k] - have(k)));
+        text('Missing: ' + miss.join(', '), x + 40, y + 432, fit('Missing: ' + miss.join(', '), 32, 'num600', w - 80), 'num600', RED, 'left');
+      }
+      const gap = 24, bw2 = (w - 80 - gap) / 2;
+      const m1 = { x: x + 40, y: y + h - 130, w: bw2, h: 96 }, m2 = { x: x + 40 + bw2 + gap, y: y + h - 130, w: bw2, h: 96 };
+      G.drawButton(m1.x, m1.y, m1.w, m1.h, room ? 'MAKE ONE' : 'QUEUE FULL', can);
+      G.drawButton(m2.x, m2.y, m2.w, m2.h, can && nq > 1 ? 'FILL QUEUE +' + nq : 'FILL QUEUE', can);
+      if (can) {
+        rects.push({ ...m1, fn: () => queueOne(panel.plot) });
+        rects.push({ ...m2, fn: () => { for (let i = canQueue(v.plots[panel.plot]); i > 0; i--) queueOne(panel.plot); } });
+      }
     } else if (panel.kind === 'tower') {
       if (v.tower >= TOWER_STAGES) {
         text('At every new block your bell rings over the village.', x + 40, y + 160, fit('At every new block your bell rings over the village.', 32, 600, w - 80), 600, ink, 'left');
@@ -475,8 +509,8 @@ window.makeVillage = function (G) {
         const n = v.tower + 1, cost = towerCost(n);
         text('This stage costs:', x + 40, y + 140, 32, 600, '#5a3a14', 'left');
         const keys = Object.keys(cost), half = Math.ceil(keys.length / 2);
-        costRow(Object.fromEntries(keys.slice(0, half).map((k) => [k, cost[k]])), x + 40, y + 220, 44);
-        costRow(Object.fromEntries(keys.slice(half).map((k) => [k, cost[k]])), x + 40, y + 290, 44);
+        costRow(Object.fromEntries(keys.slice(0, half).map((k) => [k, cost[k]])), x + 40, y + 220, 44, true);
+        costRow(Object.fromEntries(keys.slice(half).map((k) => [k, cost[k]])), x + 40, y + 290, 44, true);
         const can = affordable(cost), mb = { x: x + 40, y: y + h - 130, w: w - 80, h: 96 };
         G.drawButton(mb.x, mb.y, mb.w, mb.h, 'BUILD STAGE ' + n, can);
         if (can) rects.push({ ...mb, fn: buildStage });
