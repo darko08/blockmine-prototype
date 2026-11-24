@@ -26,11 +26,13 @@
   const SWING_SEC = 0.9, IMPACT = 0.45; // of each level's 3 s going down: the swing at the deposit, and when the pick lands
   // a fuller bag climbs slower: +0.1 s a level for every deposit in it, never more than 6 s a level
   const climbPerLevel = (count) => Math.min(6, BASE_SEC + 0.1 * count);
-  // three climb speeds: STEADY loses nothing; FAST (2x) drops a random deposit every 2 levels; RUN (3x) one every level
+  // three climb speeds: STEADY loses nothing; FAST (2x) drops a random stone for every 8 levels climbed; RUN (3x) for
+  // every 5. One running count of levels climbed toward the next drop: switching speed does not reset it, STEADY does
+  // not add to it.
   const SPEEDS = [
-    { name: 'STEADY', mult: 1, drop: 0 },
-    { name: 'FAST', mult: 2, drop: 0.5 },
-    { name: 'RUN', mult: 3, drop: 1 },
+    { name: 'STEADY', mult: 1, every: 0 },
+    { name: 'FAST', mult: 2, every: 8 },
+    { name: 'RUN', mult: 3, every: 5 },
   ];
   const KINDS = ['copper', 'ember', 'moonstone', 'blackglass'];
   const zoneOf = (n) => Math.floor((n - 1) / 3);                     // levels 1-3 are zone 0, 4-6 zone 1, ...
@@ -66,9 +68,9 @@
   // each sheet has a body layer and a sack layer (drawn over it, smaller as the bag empties)
   const SHEETS = ['climb_down', 'climb_up', 'swing_left', 'swing_right'];
   const sheet = {}, sackSheet = {};
-  SHEETS.forEach((n) => { sheet[n] = load('assets/miner/' + n + '.png?v=3'); sackSheet[n] = load('assets/miner/' + n + '_bag.png?v=3'); });
+  SHEETS.forEach((n) => { sheet[n] = load('assets/miner/' + n + '.png?v=4'); sackSheet[n] = load('assets/miner/' + n + '_bag.png?v=4'); });
   let minerMeta = null;
-  fetch('assets/miner/miner.json?v=3').then((r) => r.json()).then((m) => { minerMeta = m; }).catch(() => {});
+  fetch('assets/miner/miner.json?v=4').then((r) => r.json()).then((m) => { minerMeta = m; }).catch(() => {});
   // a frame is drawn this many painting pixels tall: his figure (about 186 of a frame's 256 px) is 1.5 levels tall
   const FRAME = 256, FIGURE_PX = 186, MINER_DRAW = Math.round(1.5 * GAP * FRAME / FIGURE_PX);
   const avg = (fs, key) => fs.reduce((a, f) => [a[0] + f[key][0] / fs.length, a[1] + f[key][1] / fs.length], [0, 0]);
@@ -217,7 +219,7 @@
   let seg = { kind: 'move', t: 0, from: 0 };   // going down: 'move' toward the next level, or 'swing' at a deposit
   let bag = 0, bagCount = 0, deepest = 0;   // points in the bag, and how many deposits
   let items = [];                       // the deposits in the bag: { kind, value }
-  let speed = 0, dropAcc = 0;           // climbing: the chosen speed (index into SPEEDS), and levels climbed toward the next drop
+  let speed = 0, dropAcc = 0;           // climbing: the chosen speed (index into SPEEDS), and levels climbed at FAST/RUN toward the next drop
   let bagShown = 0, minus = [], stones = [], sparks = [];   // the bag number as shown (it counts); "-N"; falling stones; bell-gold sparkles
   let sackAt = null;                    // where the sack on his back is on screen (for stones popping out of it)
   let chipped = new Map();              // level -> time it was chipped (this run)
@@ -240,7 +242,7 @@
     while (d > 1e-9) {
       const step = Math.min(1, d - Math.floor(d - 1e-9));
       t += step * climbPerLevel(c) / S.mult;
-      acc += step * S.drop; while (acc >= 1 - 1e-9) { acc -= 1; if (c > 0) c--; }
+      if (S.every) { acc += step; while (acc >= S.every - 1e-9) { acc -= S.every; if (c > 0) c--; } }
       d -= step;
     }
     return t;
@@ -293,8 +295,8 @@
         deepest = Math.max(deepest, levelNow());
       } else if (state === 'up') {
         const S = SPEEDS[speed], dl = Math.min(depth, h * S.mult / climbPerLevel(bagCount));
-        depth -= dl; dropAcc += dl * S.drop;
-        while (dropAcc >= 1 - 1e-9) { dropAcc -= 1; dropStone(); }
+        depth -= dl;
+        if (S.every) { dropAcc += dl; while (dropAcc >= S.every - 1e-9) { dropAcc -= S.every; dropStone(); } }
         if (depth <= 1e-9) { depth = 0; bank(); return; }
       }
     }
@@ -516,10 +518,10 @@
     const climbHands = handsOf(M.climb_down.frames), climbLamp = avg(M.climb_down.frames, 'lamp');
     const handY = levelY(depthNow) - camY + dy;
     let x0, y0;
-    if (name.startsWith('swing')) {   // his hips stay where they are on the ladder: lined up by the belt lamp
-      const sgn = name === 'swing_left' ? -1 : 1, sl = avg(M[name].frames, 'lamp');
-      x0 = LADDER_X + sgn * (climbLamp[0] - climbHands[0]) * k - sl[0] * k;
-      y0 = handY + (climbLamp[1] - climbHands[1]) * k - sl[1] * k;
+    if (name.startsWith('swing')) {   // the swing keeps the climb pose's head and legs: lined up by his head, where it is when climbing
+      const ch = avg(M.climb_down.frames, 'head'), sh = avg(M[name].frames, 'head');
+      x0 = LADDER_X + (ch[0] - climbHands[0]) * k - sh[0] * k;
+      y0 = handY + (ch[1] - climbHands[1]) * k - sh[1] * k;
     } else {                          // his hands on the ladder at the level mark
       const hd = handsOf(M[name].frames);
       x0 = LADDER_X - hd[0] * k; y0 = handY - hd[1] * k;
@@ -895,7 +897,13 @@
     ctx.restore();
   }
 
-  // one of the three speed buttons: its name, its own live risk, and "drops stones" under FAST and RUN
+  // the price of FAST and RUN for the rest of the climb: levels left divided by 8 or 5, rounded down
+  function priceOf(S) {
+    if (!S.every) return '';
+    const n = Math.floor(depth / S.every + 1e-9);
+    return n === 0 ? 'loses nothing' : 'loses about ' + n + ' stone' + (n === 1 ? '' : 's');
+  }
+  // one of the three speed buttons: its name, its own live risk, and under FAST and RUN what it would cost
   function drawSpeed(r, S, pct, on) {
     ctx.save();
     shadow(on ? 36 : 0, 'rgba(255,150,30,.4)');
@@ -904,11 +912,11 @@
     else { g.addColorStop(0, '#5a4220'); g.addColorStop(1, '#3a2a14'); }
     roundRect(r.x, r.y, r.w, r.h, 30); ctx.fillStyle = g; ctx.fill();
     shadow(0); ctx.lineWidth = on ? 4 : 3; ctx.strokeStyle = on ? '#7a4a12' : 'rgba(214,168,96,.55)'; ctx.stroke();
-    const ink = on ? '#22150a' : '#f0d9a8', cx = r.x + r.w / 2, drops = S.drop > 0;
+    const ink = on ? '#22150a' : '#f0d9a8', cx = r.x + r.w / 2, drops = S.every > 0, price = priceOf(S);
     const top = r.y + r.h * (drops ? 0.34 : 0.4);
     text(S.name, cx, top, fit(S.name, 54, 700, r.w - 24, 2), 700, ink, 'center', 2);
     text(pct, cx, top + 62, 56, 'num700', on ? '#3a1d05' : AMBER, 'center');
-    if (drops) text('drops stones', cx, top + 104, fit('drops stones', 28, 600, r.w - 20), 600, on ? '#4a2a0c' : 'rgba(240,217,168,.75)', 'center');
+    if (drops) text(price, cx, top + 104, fit(price, 30, 700, r.w - 18), 700, on ? '#4a1a08' : 'rgba(255,200,150,.9)', 'center');
     ctx.restore();
   }
 

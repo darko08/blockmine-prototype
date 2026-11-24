@@ -19,12 +19,17 @@ const H = 54;                                  // his height in the 3D game's un
 // the same attachment numbers as 3d/game3d.js
 const V = { lampSize: 0.16, lampHook: [0.04, 0.02, 0.15], pickLength: 0.48, bagBack: 0.0, bagUp: 0.17, bagLean: -0.38 };
 const CAM_SIDE = 0.26;                         // the camera: behind him, this far round to his right, so the belt lamp shows
-const FOV = 26;                                // a perspective camera at his chest height, looking straight (level) at his back
-const FRAME_H = H * 1.3;                       // how much of him a frame shows, top to bottom, at his body's distance
-const SHIFT = 0.3;                             // lens shift: the frame shows more below his chest; the camera itself stays level
-const SWING_TWIST = -0.95;                     // the one-handed swing: his chest turns this far to his right (radians)
+// the camera: orthographic (no perspective, so nothing is seen from above or below), level at his chest height,
+// pointing horizontally at his back; the frame shows FRAME_UP above his chest and FRAME_DOWN below it
+const FRAME_UP = H * 0.55, FRAME_DOWN = H * 0.75, FRAME_H = FRAME_UP + FRAME_DOWN;
+const SWING_TWIST = -0.4;                      // the one-handed swing: his chest turns this far toward the deposit (radians)
 const SWING_CLIMB_T = 0.15;                    // the climb pose his legs and left hand keep during the swing (share of the clip)
-const LEG_TO_IDLE = 0.35;                      // his legs: this share of the way from the climb's deep crouch toward standing
+const LEG_TO_IDLE = 0.5;                       // his legs: this share of the way from the climb's deep crouch toward standing
+// the swing at the deposit, out to his side (his right; the left sheet is the mirror): the angle of his arm above (+) or
+// below (-) the horizontal through the 12 frames: it rises out to the side, strikes down to the deposit's height (half
+// a level below his hands, beside the ladder), holds, and comes back
+const SWING_ANGLES = [-10, 15, 40, 55, 35, -5, -32, -36, -34, -28, -20, -12].map((d) => d * Math.PI / 180);
+const SWING_TOWARD_WALL = 0.3;                 // the deposit is on the wall beside the ladder: a little in front of him
 // (all from the model's own clips: the head and neck are the idle clip's, so he looks ahead, not down at his hands)
 
 const loader = new GLTFLoader();
@@ -57,7 +62,7 @@ body.traverse((m) => { if (m.isMesh) { m.frustumCulled = false; bodyMeshes.push(
 const mixer = new THREE.AnimationMixer(body);
 const clips = Object.fromEntries(miner.animations.map((c) => [c.name, c]));
 const bone = (n) => body.getObjectByName('mixamorig' + n) || body.getObjectByName('mixamorig:' + n);
-const B = { neck: bone('Neck'), head: bone('Head'), hips: bone('Hips'), hand: bone('RightHand'), lhand: bone('LeftHand'), chest: bone('Spine2'),
+const B = { rarm: bone('RightArm'), rfore: bone('RightForeArm'), neck: bone('Neck'), head: bone('Head'), hips: bone('Hips'), hand: bone('RightHand'), lhand: bone('LeftHand'), chest: bone('Spine2'),
   spine1: bone('Spine1'), lsh: bone('LeftShoulder'), rsh: bone('RightShoulder'), lup: bone('LeftUpLeg'), rup: bone('RightUpLeg'), lfoot: bone('LeftFoot'), rfoot: bone('RightFoot') };
 // the right arm, which swings the pick (everything below RightShoulder)
 const rightArm = []; B.rsh.traverse((o) => { if (o.isBone) rightArm.push(o); });
@@ -92,15 +97,12 @@ function setClip(name, t) {
   const a = mixer.clipAction(clips[name]); a.reset(); a.play(); a.setEffectiveWeight(1);
   mixer.setTime(t);
 }
-// pose one frame. kind 'climb': the climb clip at time t. kind 'swing': legs, hips and left arm hold a climb pose,
-// the right arm takes the swing clip at time t, and his chest turns to his right so the pick goes out to the side.
+// pose one frame. kind 'climb': the climb clip at time t. kind 'swing': legs, hips and left arm hold a climb pose (his
+// left hand stays on the ladder), his chest turns a little toward the deposit, and his right arm is aimed at angle t.
 function pose(kind, t) {
   root.quaternion.identity(); root.position.set(0, 0, 0);
   if (kind === 'swing') {
-    setClip('swing', t); body.updateMatrixWorld(true);
-    const armQ = rightArm.map((b) => b.quaternion.clone());
     setClip('climb', SWING_CLIMB_T * clips.climb.duration);
-    rightArm.forEach((b, i) => b.quaternion.copy(armQ[i]));
     const tw = new THREE.Quaternion().setFromAxisAngle(up, SWING_TWIST / 2);
     B.spine1.quaternion.multiply(tw); B.chest.quaternion.multiply(tw);
   } else setClip('climb', t);
@@ -116,6 +118,18 @@ function pose(kind, t) {
   const f0 = new THREE.Vector3().subVectors(at(B.lup), at(B.rup)).cross(up).setY(0).normalize();
   root.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(f0, LADDER_FACE)); root.updateMatrixWorld(true);
   root.position.add(hips0.clone().sub(at(B.hips))); root.updateMatrixWorld(true);
+  let swingDir = null, swingMove = null;
+  if (kind === 'swing') {   // aim his right arm (straight) out to the side at this frame's angle
+    const side = new THREE.Vector3().crossVectors(LADDER_FACE, up), a = t;   // t: the frame's angle
+    swingDir = side.clone().multiplyScalar(Math.cos(a)).addScaledVector(up, Math.sin(a)).addScaledVector(LADDER_FACE, SWING_TOWARD_WALL).normalize();
+    swingMove = side.clone().multiplyScalar(Math.sin(a)).addScaledVector(up, -Math.cos(a)).normalize();   // the way the pick head moves on the strike
+    B.rfore.quaternion.identity(); body.updateMatrixWorld(true);   // the arm straight (the rig's rest pose)
+    const cur = new THREE.Vector3().subVectors(at(B.rfore), at(B.rarm)).normalize();
+    const wq = new THREE.Quaternion(); B.rarm.getWorldQuaternion(wq);
+    const pq = new THREE.Quaternion(); B.rarm.parent.getWorldQuaternion(pq);
+    const nw = new THREE.Quaternion().setFromUnitVectors(cur, swingDir).multiply(wq);
+    B.rarm.quaternion.copy(pq.invert().multiply(nw)); body.updateMatrixWorld(true);
+  }
   // his chest's facing, for the sack and the pick; his hips', for the belt lamp
   const face = new THREE.Vector3().subVectors(at(B.lsh), at(B.rsh)).cross(up).setY(0).normalize();
   const right = new THREE.Vector3().crossVectors(face, up), yaw = Math.atan2(-face.z, face.x);
@@ -126,11 +140,10 @@ function pose(kind, t) {
   const c = at(B.chest);
   bag.position.copy(c).addScaledVector(face, -H * V.bagBack).addScaledVector(up, H * V.bagUp); bag.rotation.set(0, yaw, V.bagLean);
   const hand = at(B.hand), hq = new THREE.Quaternion(); B.hand.getWorldQuaternion(hq);
-  if (kind === 'swing') {   // in his right fist, the handle along the fist
-    const y = new THREE.Vector3(0, 0, -1).applyQuaternion(hq), fingers = new THREE.Vector3(0, 1, 0).applyQuaternion(hq);
-    const x = new THREE.Vector3().crossVectors(right, y); if (x.lengthSq() < 1e-4) x.copy(fingers); x.normalize();
+  if (kind === 'swing') {   // in his right fist: the handle runs on from his arm, the head points the way it strikes
+    const y = swingDir.clone(), x = swingMove.clone().addScaledVector(y, -swingMove.dot(y)).normalize();
     const z = new THREE.Vector3().crossVectors(x, y);
-    pickG.matrix.makeBasis(x, y, z).setPosition(hand.clone().addScaledVector(fingers, H * 0.035));
+    pickG.matrix.makeBasis(x, y, z).setPosition(hand.clone().addScaledVector(y, -H * 0.02));
   } else {                  // across his back, head up by his shoulder
     const sy = up.clone().multiplyScalar(0.85).addScaledVector(right, -0.5).normalize();
     const sx = new THREE.Vector3().crossVectors(sy, face).normalize(), sz = new THREE.Vector3().crossVectors(sx, sy);
@@ -146,12 +159,10 @@ pose('climb', 0);
 const chestY = at(B.chest).y, hipsP = at(B.hips);
 const ladderRight = new THREE.Vector3().crossVectors(LADDER_FACE, up);
 const camDir = LADDER_FACE.clone().multiplyScalar(Math.cos(CAM_SIDE)).addScaledVector(ladderRight, -Math.sin(CAM_SIDE)).normalize();
-const DIST = (FRAME_H / 2) / Math.tan(FOV * Math.PI / 360);
-const cam = new THREE.PerspectiveCamera(FOV, 1, 1, 2000);
+const cam = new THREE.OrthographicCamera(-FRAME_H / 2, FRAME_H / 2, FRAME_UP, -FRAME_DOWN, 1, 1000);
 const target = new THREE.Vector3(hipsP.x, chestY, hipsP.z);
-cam.position.copy(target).addScaledVector(camDir, -DIST); cam.lookAt(target);
+cam.position.copy(target).addScaledVector(camDir, -300); cam.lookAt(target);   // level: at his chest height
 cam.updateMatrixWorld(true);
-cam.projectionMatrix.elements[9] = -SHIFT; cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();   // the lens shift
 key.position.copy(target).addScaledVector(camDir, -100).addScaledVector(ladderRight, 120).addScaledVector(up, 160); key.target.position.copy(target);
 const project = (v) => { const p = v.clone().project(cam); return [+((p.x + 1) / 2 * PX).toFixed(1), +((1 - p.y) / 2 * PX).toFixed(1)]; };
 
@@ -164,14 +175,17 @@ const SHEETS = [
 ];
 const preview = new URLSearchParams(location.search).has('preview');
 const out = {}, meta = { frameHeightInHisHeights: FRAME_H / H, frames: FRAMES, size: PX,
-  camera: 'perspective, ' + FOV + ' deg, level at his chest height, behind him and ' + Math.round(CAM_SIDE * 57.3) + ' deg round to his right', sheets: {} };
+  camera: 'orthographic, level at his chest height, behind him and ' + Math.round(CAM_SIDE * 57.3) + ' deg round to his right', sheets: {} };
 for (const s of SHEETS) {
   const sheets = {}, gs = {};
   for (const layer of ['body', 'bag']) { const c = document.createElement('canvas'); c.width = PX * FRAMES; c.height = PX; sheets[layer] = c; gs[layer] = c.getContext('2d'); }
   const kindClip = s.kind === 'swing' ? 'swing' : 'climb', dur = clips[kindClip].duration, m = [];
+  // the swing reaches out to his right: that sheet's frame is moved over that way so the pick stays in it
+  const tgt = target.clone().addScaledVector(ladderRight, s.kind === 'swing' ? FRAME_H * 0.24 : 0);
+  cam.position.copy(tgt).addScaledVector(camDir, -300); cam.lookAt(tgt); cam.updateMatrixWorld(true);
   for (let f = 0; f < FRAMES; f++) {
     const u = f / FRAMES;
-    const t = s.kind === 'swing' ? f / (FRAMES - 1) * dur * 0.999 : (s.reverse ? 1 - u : u) * dur;
+    const t = s.kind === 'swing' ? SWING_ANGLES[f] : (s.reverse ? 1 - u : u) * dur;
     pose(s.kind, t);
     for (const layer of ['body', 'bag']) { show(layer); renderer.render(scene, cam); gs[layer].drawImage(renderer.domElement, f * PX, 0, PX, PX); }
     show('body');
