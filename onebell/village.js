@@ -223,12 +223,13 @@ window.makeVillage = function (G) {
         continue;
       }
       if (!b) {   // an empty plot: a quiet "+" to build on it
-        const pulse = reduce ? 1 : 0.78 + 0.22 * Math.sin(t / 700);   // all together, gently, never below half
-        ctx.save(); shadow(10, 'rgba(0,0,0,.6)');
-        ctx.beginPath(); ctx.arc(p.x, p.y, 34, 0, Math.PI * 2); ctx.fillStyle = 'rgba(20,12,4,.78)'; ctx.fill();   // a dark circle behind
-        shadow(0); ctx.globalAlpha = pulse;
-        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,220,160,.95)'; ctx.beginPath(); ctx.arc(p.x, p.y, 26, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(p.x - 12, p.y); ctx.lineTo(p.x + 12, p.y); ctx.moveTo(p.x, p.y - 12); ctx.lineTo(p.x, p.y + 12); ctx.stroke();
+        // a small parchment circle with a brown plus and a thin dark outline; all pulse together, never below half
+        const pulse = reduce ? 1 : 0.78 + 0.22 * Math.sin(t / 700);
+        ctx.save(); ctx.globalAlpha = pulse; shadow(6, 'rgba(0,0,0,.45)');
+        ctx.beginPath(); ctx.arc(p.x, p.y, 17, 0, Math.PI * 2); ctx.fillStyle = '#f2e2bc'; ctx.fill();
+        shadow(0); ctx.lineWidth = 2; ctx.strokeStyle = '#2a1806'; ctx.stroke();
+        ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#6a3e12';
+        ctx.beginPath(); ctx.moveTo(p.x - 8, p.y); ctx.lineTo(p.x + 8, p.y); ctx.moveTo(p.x, p.y - 8); ctx.lineTo(p.x, p.y + 8); ctx.stroke();
         ctx.restore();
         rects.push({ x: p.x - p.w / 2, y: p.y - p.w * 0.28, w: p.w, h: p.w * 0.5, fn: () => { panel = { kind: 'build', plot: id }; } });
         continue;
@@ -250,15 +251,17 @@ window.makeVillage = function (G) {
     drawDust(t);
 
     // ---- top: the counters, and the small line under them
-    const tg = ctx.createLinearGradient(0, 0, 0, 270);
-    tg.addColorStop(0, 'rgba(8,6,4,.9)'); tg.addColorStop(0.68, 'rgba(8,6,4,.84)'); tg.addColorStop(1, 'rgba(8,6,4,0)');
-    ctx.fillStyle = tg; ctx.fillRect(L, 0, V.VW, 270);
+    // a soft dark band, about 45% opaque, ending just under the streak line; the sun's glow is drawn over it
+    const bandEnd = 58 + V.safeTop + 172, tg = ctx.createLinearGradient(0, 0, 0, bandEnd + 40);
+    tg.addColorStop(0, 'rgba(8,6,4,.45)'); tg.addColorStop(bandEnd / (bandEnd + 40), 'rgba(8,6,4,.45)'); tg.addColorStop(1, 'rgba(8,6,4,0)');
+    ctx.fillStyle = tg; ctx.fillRect(L, 0, V.VW, bandEnd + 40);
+    FX.sun(t, reduce);
     const top = 58 + V.safeTop, cells = [...ORES, 'coins'], cw = (V.VW - 40) / cells.length;
     cells.forEach((k, i) => {
       const cx = L + 20 + cw * (i + 0.5), n = have(k) - (pendingIn[k] || 0);
       counterPos[k] = { x: cx - cw * 0.2, y: top - 8 };
       drawItem(k, cx - cw * 0.22, top - 8, 56, n > 0 ? 1 : 0.4);
-      shadow(8); text(fmtN(n), cx + cw * 0.04, top + 9, fit(fmtN(n), 48, 'num700', cw * 0.55), 'num700', n > 0 ? CREAM : 'rgba(239,230,210,.4)', 'left'); shadow(0);
+      thin(); text(fmtN(n), cx + cw * 0.04, top + 9, fit(fmtN(n), 48, 'num700', cw * 0.55), 'num700', n > 0 ? CREAM : 'rgba(239,230,210,.4)', 'left'); shadow(0);
     });
     // the goods, the same size and brightness as the ores; dim only those the player cannot make yet (and has none of)
     const canMake = new Set(Object.keys(WORKSHOPS).filter((k) => count(k) > 0).map((k) => WORKSHOPS[k].makes));
@@ -267,17 +270,17 @@ window.makeVillage = function (G) {
       const cx = gx0 + cw * (i + 0.5), n = have(k) - (pendingIn[k] || 0), on = n > 0 || canMake.has(k);
       counterPos[k] = { x: cx - cw * 0.22, y: top + 72 };
       drawGood(k, cx - cw * 0.22, top + 72, 56, on ? 1 : 0.4);
-      shadow(8); text(fmtN(n), cx + cw * 0.04, top + 89, fit(fmtN(n), 48, 'num700', cw * 0.55), 'num700', on ? CREAM : 'rgba(239,230,210,.4)', 'left'); shadow(0);
+      thin(); text(fmtN(n), cx + cw * 0.04, top + 89, fit(fmtN(n), 48, 'num700', cw * 0.55), 'num700', on ? CREAM : 'rgba(239,230,210,.4)', 'left'); shadow(0);
     });
     const rec = G.rec, st = G.streak();
     const line = 'Streak ' + st + ' day' + (st === 1 ? '' : 's') + '   ·   Best: ' + (rec.best ? 'level ' + rec.best : '—') + '   ·   Score ' + fmtN(rec.banked || 0);
-    shadow(8); text(line, CX, top + 146, fit(line, 32, 600, V.VW - 60), 600, DIM, 'center'); shadow(0);
+    thin(); text(line, CX, top + 146, fit(line, 32, 600, V.VW - 60), 600, DIM, 'center'); shadow(0);
 
     drawOrderCard(t, L + 22, top + 172);
 
     // ---- bottom: the big button, and the block under it
     const blk = G.block(), live = blk.feed === 'live' && blk.height !== null;
-    const bx = L + 34, bw = V.VW - 68, by = 1660, bh = 176;
+    const bw = V.VW * 0.7, bh = 118, bx = L + (V.VW - bw) / 2, by = 1836 - V.safeBot - bh;   // two thirds high, 70% wide
     G.drawButton(bx, by, bw, bh, live ? 'GO DOWN' : blk.height === null ? 'CONNECTING' : 'PAUSED', live);
     if (live) rects.push({ x: bx - 10, y: by - 20, w: bw + 20, h: bh + 40, fn: goDown });
     const bl = blk.height === null ? 'Connecting to the Bitcoin chain…' : 'Block ' + blk.height.toLocaleString('en-US') + ' open ' + fmtClock(blk.now - blk.at);
@@ -300,61 +303,60 @@ window.makeVillage = function (G) {
     if (panel) drawPanel(t, V);
   }
   const fmtN = (n) => Math.max(0, n).toLocaleString('en-US');
+  // a thin dark shadow under counter text, so it reads over the sun's glow
+  function thin() { ctx.shadowColor = 'rgba(0,0,0,.95)'; ctx.shadowBlur = 3; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 1.5; }
 
-  // ---- the order card (top left) ---------------------------------------------------------------------------------------
-  // drawn at two thirds of its design size, so it does not crowd the top-left plot
-  const CARD_K = 0.67;
+  // ---- the order card (top left): its smallest text is the streak line's size (32) ------------------------------
   let cardAt = { x: 0, y: 0, w: 0, h: 0 };
   function drawOrderCard(t, x0, y0) {
     if (orderIdx >= v.orders.length) orderIdx = 0;
     const o = v.orders[orderIdx];
     if (!o) return;
-    const k = CARD_K, w = 310, h = o.wait ? 78 : 262;   // waiting: a small one-line card
-    const R = (rx, ry, rw, rh) => ({ x: x0 + rx * k, y: y0 + ry * k, w: rw * k, h: rh * k });   // card -> screen
-    cardAt = R(0, 0, w, h);
-    ctx.save(); ctx.translate(x0, y0); ctx.scale(k, k);
-    shadow(18, 'rgba(0,0,0,.7)');
-    roundRect(0, 0, w, h, 14);
-    const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#efdcb2'); g.addColorStop(1, '#cdb07c');
+    const w = 300, h = o.wait ? 62 : 190, x = x0, y = y0;   // waiting: a small one-line card
+    cardAt = { x, y, w, h };
+    ctx.save(); shadow(18, 'rgba(0,0,0,.7)');
+    roundRect(x, y, w, h, 14);
+    const g = ctx.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, '#efdcb2'); g.addColorStop(1, '#cdb07c');
     ctx.fillStyle = g; ctx.fill(); shadow(0); ctx.lineWidth = 3; ctx.strokeStyle = '#6a4a1c'; ctx.stroke();
-    roundRect(7, 7, w - 14, h - 14, 10); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(106,74,28,.5)'; ctx.stroke();
-    const ink = BROWN, cx = w / 2;
+    roundRect(x + 6, y + 6, w - 12, h - 12, 10); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(106,74,28,.5)'; ctx.stroke();
+    const ink = BROWN, cx = x + w / 2;
     if (o.wait) {
       const s1 = 'Next order in ' + fmtClock(Math.max(0, o.wait - Date.now()) + 999);
-      text(s1, cx, 51, fit(s1, 36, 'num600', w - 30), 'num600', ink, 'center');
+      text(s1, cx, y + 42, Math.max(32, fit(s1, 34, 'num600', w - 24)), 'num600', ink, 'center');
     } else {
-      const nm = GOOD_NAME[o.good][o.n === 1 ? 0 : 1], title = 'Order: ' + o.n + ' ' + nm;
-      text(title, cx, 48, fit(title, 34, 700, w - 30), 700, ink, 'center');
-      drawGood(o.good, cx, 102, 60);
-      const rw = 'Reward', rs = fmtN(o.reward);
-      text(rw, 26, 168, 30, 600, ink, 'left');
-      drawGood('coins', 26 + measure(rw, 30, 600) + 24, 158, 30);
-      text(rs, 26 + measure(rw, 30, 600) + 46, 169, 32, 'num700', ink, 'left');
+      const nm = GOOD_NAME[o.good][o.n === 1 ? 0 : 1], title = o.n + ' ' + nm;
+      text(title, cx, y + 38, Math.max(32, fit(title, 36, 700, w - 24)), 700, ink, 'center');
+      drawGood(o.good, cx, y + 70, 40);
+      const rw = 'Reward', rs = fmtN(o.reward), rwW = measure(rw, 32, 600), rsW = measure(rs, 34, 'num700');
+      const rx = cx - (rwW + 44 + rsW) / 2;
+      text(rw, rx, y + 124, 32, 600, ink, 'left');
+      drawGood('coins', rx + rwW + 20, y + 113, 30);
+      text(rs, rx + rwW + 40, y + 125, 34, 'num700', ink, 'left');
       const skip = Date.now() - o.since > SKIP_AFTER;
-      const ok = have(o.good) >= o.n, fb = { x: 22, y: 190, w: w - 44 - (skip ? 74 : 0), h: 52 };
-      ctx.save(); ctx.globalAlpha = ok ? 1 : 0.45; shadow(ok ? 16 : 0, 'rgba(255,150,30,.6)');
+      const ok = have(o.good) >= o.n, fb = { x: x + 16, y: y + 138, w: w - 32 - (skip ? 76 : 0), h: 42 };
+      ctx.save(); ctx.globalAlpha = ok ? 1 : 0.5; shadow(ok ? 16 : 0, 'rgba(255,150,30,.6)');
       roundRect(fb.x, fb.y, fb.w, fb.h, 12);
       const bg = ctx.createLinearGradient(0, fb.y, 0, fb.y + fb.h); bg.addColorStop(0, '#ffcf6a'); bg.addColorStop(1, '#c97c1c');
       ctx.fillStyle = bg; ctx.fill(); shadow(0); ctx.lineWidth = 2.5; ctx.strokeStyle = '#7a4a12'; ctx.stroke();
-      text(ok ? 'FILL' : 'have ' + Math.min(have(o.good), o.n) + ' of ' + o.n, fb.x + fb.w / 2, fb.y + 36, ok ? 34 : 28, 700, '#22150a', 'center', ok ? 3 : 0);
+      text(ok ? 'FILL' : 'have ' + Math.min(have(o.good), o.n) + ' of ' + o.n, fb.x + fb.w / 2, fb.y + 31, ok ? 34 : 32, 700, '#22150a', 'center', ok ? 3 : 0);
       ctx.restore();
-      if (ok) rects.push({ ...R(fb.x - 6, fb.y - 6, fb.w + 12, fb.h + 12), fn: () => fill(orderIdx) });
+      if (ok) rects.push({ x: fb.x - 6, y: fb.y - 6, w: fb.w + 12, h: fb.h + 12, fn: () => fill(orderIdx) });
       if (skip) {
-        const sb = { x: w - 86, y: 190, w: 64, h: 52 };
-        text('skip', sb.x + sb.w / 2, sb.y + 34, 30, 600, '#5a3a14', 'center');
-        rects.push({ ...R(sb.x, sb.y - 6, sb.w + 10, sb.h + 12), fn: () => { v.orders[orderIdx] = newOrder(); save(); } });
+        const sb = { x: x + w - 86, y: y + 138, w: 70, h: 42 };
+        text('skip', sb.x + sb.w / 2, sb.y + 31, 32, 600, '#5a3a14', 'center');
+        rects.push({ x: sb.x, y: sb.y - 6, w: sb.w + 10, h: sb.h + 12, fn: () => { v.orders[orderIdx] = newOrder(); save(); } });
       }
     }
     ctx.restore();
-    if (v.orders.length > 1) {   // more orders: ‹ 1/3 ›, on a dark pill so it reads over the sky
-      const cxs = x0 + w * k / 2, yb = y0 + h * k;
-      ctx.save(); roundRect(cxs - 92, yb + 6, 184, 40, 20); ctx.fillStyle = 'rgba(12,8,4,.72)'; ctx.fill(); ctx.restore();
-      shadow(8);
-      text((orderIdx + 1) + ' / ' + v.orders.length, cxs, yb + 32, 26, 'num600', CREAM, 'center');
-      text('‹', cxs - 56, yb + 34, 40, 700, CREAM, 'center'); text('›', cxs + 56, yb + 34, 40, 700, CREAM, 'center');
+    if (v.orders.length > 1) {   // more orders: ‹ 1/3 ›, beside the card's top, on a dark pill
+      const px = x + w + 12, py = y + 4;
+      ctx.save(); roundRect(px, py, 170, 48, 24); ctx.fillStyle = 'rgba(12,8,4,.72)'; ctx.fill(); ctx.restore();
+      thin();
+      text((orderIdx + 1) + ' / ' + v.orders.length, px + 85, py + 35, 32, 'num600', CREAM, 'center');
+      text('‹', px + 24, py + 37, 42, 700, CREAM, 'center'); text('›', px + 146, py + 37, 42, 700, CREAM, 'center');
       shadow(0);
-      rects.push({ x: cxs - 90, y: yb + 4, w: 64, h: 46, fn: () => { orderIdx = (orderIdx + v.orders.length - 1) % v.orders.length; } });
-      rects.push({ x: cxs + 26, y: yb + 4, w: 64, h: 46, fn: () => { orderIdx = (orderIdx + 1) % v.orders.length; } });
+      rects.push({ x: px - 6, y: py - 6, w: 70, h: 60, fn: () => { orderIdx = (orderIdx + v.orders.length - 1) % v.orders.length; } });
+      rects.push({ x: px + 106, y: py - 6, w: 70, h: 60, fn: () => { orderIdx = (orderIdx + 1) % v.orders.length; } });
     }
   }
   function fill(i) {

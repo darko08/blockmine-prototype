@@ -87,12 +87,6 @@ window.makeVillageFx = function (G) {
     if (!built) { if (G.ready(img)) build(img); else return; }
     const T = t / 1000;
     if (!reduce) {
-      // the sun: a slow pulse and very slowly turning rays
-      ctx.save(); ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.22 + 0.06 * Math.sin(T * 0.9);
-      ctx.translate(SUN.x, SUN.y); ctx.rotate(T * 0.02); ctx.drawImage(rays, -260, -260); ctx.rotate(-T * 0.02);
-      ctx.globalAlpha = 0.35 + 0.12 * Math.sin(T * 0.9); const k = 1 + 0.05 * Math.sin(T * 0.9); ctx.drawImage(sunGlow, -150 * k, -150 * k, 300 * k, 300 * k);
-      ctx.restore();
       // clouds drifting, and their faint shadows sliding over the hill
       for (const c of clouds) {
         c.x += c.sp * G.dt; if (c.x > IMG_W + 40) { c.x = -380; c.y = c.y; }
@@ -203,6 +197,17 @@ window.makeVillageFx = function (G) {
     } else if (smoke.has(id) && !working) smoke.delete(id);
   }
 
+  // the sun, drawn by the village over the top band and under the counters: a slow pulse and very slowly turning
+  // faint rays that reach down past the band onto the sky (still, when motion is reduced)
+  function sun(t, reduce) {
+    if (!built) return;
+    const T = reduce ? 0 : t / 1000;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.24 + 0.06 * Math.sin(T * 0.9);
+    ctx.translate(SUN.x, SUN.y); ctx.rotate(T * 0.02); ctx.drawImage(rays, -260 * 1.35, -260 * 1.35, 520 * 1.35, 520 * 1.35); ctx.rotate(-T * 0.02);
+    ctx.globalAlpha = 0.5 + 0.12 * Math.sin(T * 0.9); const k = 1 + 0.05 * Math.sin(T * 0.9); ctx.drawImage(sunGlow, -150 * k, -150 * k, 300 * k, 300 * k);
+    ctx.restore();
+  }
   function newBlock(t) { swingAt = t; }
-  return { under, workshop, newBlock };
+  return { under, sun, workshop, newBlock };
 };
