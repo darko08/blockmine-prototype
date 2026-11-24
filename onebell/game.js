@@ -177,7 +177,8 @@
     });
   }
   function play(a) { if (!a || muted) return; try { a.pause(); a.currentTime = 0; a.muted = false; const p = a.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
-  function ringBell() { bellFlashAt = performance.now(); Music.hush(); play(bell); }
+  function playQuiet(a, vol) { if (!a || muted) return; try { a.pause(); a.currentTime = 0; a.volume = vol; a.muted = false; const p = a.play(); if (p && p.then) p.then(() => {}, () => {}); a.onended = () => { a.volume = 1; }; } catch (e) {} }
+  function ringBell() { bell.volume = 1; bellFlashAt = performance.now(); Music.hush(); play(bell); }
   function setMuted(m) {
     muted = m;
     try { localStorage.setItem(MUTE_KEY, m ? '1' : '0'); } catch (e) {}
@@ -229,6 +230,8 @@
   let items = [];                       // the deposits in the bag: { kind, value }
   let speed = 0, dropAcc = 0;           // climbing: the chosen speed (index into SPEEDS), and levels climbed at FAST/RUN toward the next drop
   let bagShown = 0, minus = [], stones = [], sparks = [];   // the bag number as shown (it counts); "-N"; falling stones; bell-gold sparkles
+  let mode = 'village';                 // 'village' (the home screen) | 'mine'
+  let villageReturn = null;             // { at, counts }: back to the village after the run's message
   let oreFlash = {};                    // ore -> { at, up }: its row flashes bright (chipped) or red (fell out)
   let sackAt = null;                    // where the sack on his back is on screen (for stones popping out of it)
   let chipped = new Map();              // level -> time it was chipped (this run)
@@ -273,7 +276,7 @@
     const side = (n + firstSide) % 2 ? 1 : -1;                // alternating left and right
     d = {
       n, gold, side, kind: gold ? 'bellgold' : kindOf(n), value: valueOf(n) * (gold ? GOLD_X : 1),
-      x: (side < 0 ? 448 : 646) + (r() - 0.5) * 14, dy: GAP * 0.5 + (r() - 0.5) * 16,
+      x: (side < 0 ? 448 : 646) + (r() - 0.5) * 14, dy: GAP * (n === 1 ? 0.9 : 0.5) + (r() - 0.5) * 16,   // level 1's sits lower, clear of him at the hatch
       scale: 0.9 + r() * 0.1, rot: (r() - 0.5) * 0.2, phase: r() * 6.28,
       sparks: Array.from({ length: 5 }, () => [(r() - 0.5) * 0.7, (r() - 0.5) * 0.7, r() * 6.28, 0.6 + r() * 0.8]),
     };
@@ -337,7 +340,7 @@
   }
   function resetRun() {
     state = 'hatch'; depth = 0; bag = 0; bagCount = 0; deepest = 0; seg = { kind: 'move', t: 0, from: 0 };
-    chipped = new Map(); floats = []; animT = 0; items = []; speed = 0; dropAcc = 0; bagShown = 0; minus = [];
+    chipped = new Map(); floats = []; animT = 0; items = []; speed = 0; dropAcc = 0; bagShown = 0; minus = []; oreFlash = {};
   }
 
   function bank() {
@@ -349,6 +352,10 @@
     if (rec.lastDay !== t) { rec.streak = rec.lastDay === yesterday() ? rec.streak + 1 : 1; rec.lastDay = t; }
     saveRec();
     say('You got out. +' + got.toLocaleString('en-US') + ' points.', 'From level ' + lvl + '. The bag is banked.');
+    // the ores go into the village's stores now (saved); they fly in when the village shows, 2 seconds from now
+    const counts = {}; got_ores.forEach((it) => { counts[it.kind] = (counts[it.kind] || 0) + 1; });
+    Village.banked(counts);
+    villageReturn = { at: performance.now() + 2000, counts };
   }
 
   function press() {
@@ -369,7 +376,7 @@
     if (!b.initial && (state === 'down' || state === 'up')) {
       if (b.missed) {
         say('A block came while the feed was down.', 'This run does not count. Nothing lost, nothing banked.');
-        resetRun();
+        resetRun(); villageReturn = { at: performance.now() + 3000, counts: null };
       } else {
         const lvl = levelNow(), secs = Math.ceil(climbSeconds(state === 'up' ? speed : 0) - 1e-6), lost = bag;
         ringBell();
@@ -379,9 +386,12 @@
         // hold the moment: he stays where the bell caught him, then the new round starts at the hatch
         caught = { at: performance.now(), depth, sheet: lastSheet, frame: lastFrame, count: bagCount };
         state = 'caught'; bag = 0; bagCount = 0;
+        villageReturn = { at: performance.now() + 3000, counts: null };   // back to the village with nothing
       }
-    } else if (!b.initial && !msg) {
-      say('Block ' + b.height.toLocaleString('en-US') + ' found.', 'A new mine. The bell rings only for miners below.', 4000);
+    } else if (!b.initial) {
+      if (!msg && mode === 'mine') say('Block ' + b.height.toLocaleString('en-US') + ' found.', 'A new mine. The bell rings only for miners below.', 4000);
+      // a finished bell tower rings once, quietly, at every new block
+      if (Village.towerComplete()) { playQuiet(bell, 0.3); if (mode === 'village') Village.bellLine(); }
     }
     blockHeight = b.height; blockAt = b.arrivedAt; blockHash = b.hash;
     if (state !== 'caught') { resetRun(); mineHash = blockHash; }
@@ -550,7 +560,20 @@
     advance();
     const t = performance.now(), frameDt = Math.min(0.25, (t - lastFrameT) / 1000);
     lastFrameT = t;
-    Music.update(frameDt, levelNow());
+    Music.update(frameDt, mode === 'village' ? 0 : levelNow());
+    if (mode === 'village') {
+      ctx.setTransform(dpr * scale, 0, 0, dpr * scale, -vx0 * dpr * scale, 0);
+      Village.draw(t);
+      requestAnimationFrame(draw);
+      return;
+    }
+    if (villageReturn && t >= villageReturn.at) {   // the run's message has been shown: back to the village
+      const c = villageReturn.counts; villageReturn = null; mode = 'village'; msg = null;
+      if (state === 'caught') { caught = null; resetRun(); mineHash = blockHash; camY = -TOP_OFF; camEase = null; }
+      Village.arrive(c);
+      requestAnimationFrame(draw);
+      return;
+    }
     const L = vx0, R = vx0 + VW, CX = IMG_W / 2;
 
     // the camera: follows his hands down to the middle of the screen, then the shaft scrolls past him
@@ -859,7 +882,7 @@
       if (!s.bounced && (s.x < 418 || s.x > 676)) { s.bounced = true; s.x = s.x < 418 ? 418 : 676; s.vx = -s.vx * 0.5; s.vy = Math.min(s.vy, 0) * 0.3 - 40; s.vr = -s.vr * 1.3; }
       s.trail.push([s.x, s.wy]); if (s.trail.length > 10) s.trail.shift();
       const art = deps[s.kind], y = s.wy - camY;
-      const fade = clamp01((FADE_TOP + 40 - y) / 260), sz = s.kind === 'bellgold' ? 92 : 84;
+      const fade = clamp01((FADE_TOP + 40 - y) / 260), sz = s.kind === 'bellgold' ? 62 : 58;   // the small loose-stone size
       if (fade <= 0) continue;
       ctx.save();
       if (s.kind === 'ember') {   // a warm trail
@@ -1065,6 +1088,26 @@
     ctx.restore();
   }
 
+  // ---- the village (village.js): the home screen ---------------------------------------------------------------------
+  // GO DOWN there opens the mine and starts the descent at once
+  function startDescent() {
+    if (feed !== 'live' || blockHeight === null) return;
+    mode = 'mine'; msg = null; villageReturn = null;
+    if (state !== 'hatch') return;
+    camY = -TOP_OFF; camEase = null; simT = performance.now();
+    press();
+  }
+  function drawSoundIcons(mx, my, nx, ny) {
+    muteRect = { x: mx - 14, y: my - 14, w: 72, h: 80 }; drawSpeaker(mx, my, 44);
+    musicRect = { x: nx - 14, y: ny - 14, w: 72, h: 80 }; drawNote(nx, ny, 44);
+  }
+  const Village = window.makeVillage({
+    ctx, IMG_W, IMG_H, ORES, text, fit, measure, shadow, roundRect, wrap, clamp01, fmtClock, drawOreIcon, drawButton, drawSoundIcons,
+    colors: { CREAM, DIM, AMBER, AMBER_HI }, load, ready, TEST, rec, streak: shownStreak, goDown: startDescent,
+    view: () => ({ vx0, VW, scale, dpr, safeTop, safeBot }),
+    block: () => ({ height: blockHeight, at: blockAt, feed, now: clockNow() }),
+  });
+
   // ---- input ----------------------------------------------------------------------------------
   const inside = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
   canvas.addEventListener('pointerdown', (e) => {
@@ -1073,6 +1116,7 @@
     if (inside(muteRect, x, y)) { unlockAudio(); setMuted(!muted); return; }
     if (inside(musicRect, x, y)) { unlockAudio(); toggleMusic(); return; }
     unlockAudio(); Music.tryT = 0;
+    if (mode === 'village') { e.preventDefault(); Village.tap(x, y); return; }
     if (state === 'up' && speedRects.length) {
       speedRects.forEach((r, i) => { if (inside({ x: r.x - 6, y: r.y - 24, w: r.w + 12, h: r.h + 40 }, x, y)) { e.preventDefault(); setSpeed(i); } });
       return;
@@ -1084,6 +1128,7 @@
     unlockAudio(); Music.tryT = 0;
     if (e.key === 'm' || e.key === 'M') setMuted(!muted);
     else if (e.key === 'n' || e.key === 'N') toggleMusic();
+    else if (mode === 'village') Village.key(e.key);
     else if (e.key === '1' || e.key === '2' || e.key === '3') setSpeed(+e.key - 1);
     else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); press(); }
   });
