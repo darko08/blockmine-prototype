@@ -38,6 +38,8 @@
   const zoneOf = (n) => Math.floor((n - 1) / 3);                     // levels 1-3 are zone 0, 4-6 zone 1, ...
   const kindOf = (n) => KINDS[zoneOf(n) % 4];
   const valueOf = (n) => { const z = zoneOf(n); return z < 4 ? [3, 9, 24, 60][z] : 60 * (z - 2); };   // 3, 9, 24, 60, then 120, 180, ...
+  // a deposit chips into this many loose stones of its ore: deeper pays in stones (bell gold always gives 1)
+  const stonesOf = (n, gold) => (gold ? 1 : 1 + Math.floor((n - 1) / 12));
   const GOLD_FROM = 5, GOLD_ODDS = 1 / 8, GOLD_X = 5, GOLD_SEEN = 3;   // bell gold: from level 5, 1 in 8, worth 5x, glimmers 3 levels down
   const qs = new URLSearchParams(location.search);
   const TEST = qs.has('test') && qs.get('test') !== '0';
@@ -229,7 +231,7 @@
   let bag = 0, bagCount = 0, deepest = 0;   // points in the bag, and how many deposits
   let items = [];                       // the deposits in the bag: { kind, value }
   let speed = 0, dropAcc = 0;           // climbing: the chosen speed (index into SPEEDS), and levels climbed at FAST/RUN toward the next drop
-  let bagShown = 0, minus = [], stones = [], sparks = [];   // the bag number as shown (it counts); "-N"; falling stones; bell-gold sparkles
+  let stonesShown = 0, bagShown = 0, minus = [], stones = [], sparks = [];   // the bag number as shown (it counts); "-N"; falling stones; bell-gold sparkles
   let mode = 'village';                 // 'village' (the home screen) | 'mine'
   let villageReturn = null;             // { at, counts }: back to the village after the run's message
   let oreFlash = {};                    // ore -> { at, up }: its row flashes bright (chipped) or red (fell out)
@@ -275,7 +277,7 @@
     const gold = n >= GOLD_FROM && r() < GOLD_ODDS;
     const side = (n + firstSide) % 2 ? 1 : -1;                // alternating left and right
     d = {
-      n, gold, side, kind: gold ? 'bellgold' : kindOf(n), value: valueOf(n) * (gold ? GOLD_X : 1),
+      n, gold, side, kind: gold ? 'bellgold' : kindOf(n), value: valueOf(n) * (gold ? GOLD_X : 1), stones: stonesOf(n, gold),
       x: (side < 0 ? 448 : 646) + (r() - 0.5) * 14, dy: GAP * (n === 1 ? 0.9 : 0.5) + (r() - 0.5) * 16,   // level 1's sits lower, clear of him at the hatch
       scale: 0.9 + r() * 0.1, rot: (r() - 0.5) * 0.2, phase: r() * 6.28,
       sparks: Array.from({ length: 5 }, () => [(r() - 0.5) * 0.7, (r() - 0.5) * 0.7, r() * 6.28, 0.6 + r() * 0.8]),
@@ -317,10 +319,12 @@
   function chip(n) {
     const d = deposit(n);
     chipped.set(n, performance.now());
-    bag += d.value; bagCount++; items.push({ kind: d.kind, value: d.value });
+    // the bag holds stones: each carries its share of the deposit's points, so a dropped stone takes only its share
+    bag += d.value; bagCount += d.stones;
+    for (let i = 0; i < d.stones; i++) items.push({ kind: d.kind, value: d.value / d.stones });
     oreFlash[d.kind] = { at: performance.now(), up: true };
     play(pickRec);
-    floats.push({ v: d.value, x: d.x, wy: levelY(n) + d.dy, at: performance.now(), gold: d.gold });
+    floats.push({ v: d.stones, kind: d.kind, x: d.x, wy: levelY(n) + d.dy, at: performance.now(), gold: d.gold });
     for (let i = 0; i < 16; i++) bits.push({ x: d.x + (Math.random() - 0.5) * 50, wy: levelY(n) + d.dy + (Math.random() - 0.5) * 40,
       vx: (Math.random() - 0.5) * 120 - d.side * 40, vy: -60 - Math.random() * 120, s: 4 + Math.random() * 7, at: performance.now(),
       c: d.gold ? '#f2c14a' : ['#6b4a2e', '#4a3220', '#8a6a48'][i % 3] });
@@ -331,7 +335,7 @@
     if (!items.length) return;
     const it = items.splice(Math.floor(Math.random() * items.length), 1)[0];
     bag -= it.value; bagCount--;
-    minus.push({ v: it.value, at: performance.now() });
+    minus.push({ v: 1, kind: it.kind, at: performance.now() });
     oreFlash[it.kind] = { at: performance.now(), up: false };
     play(stoneRec);
     const from = sackAt || { x: LADDER_X, y: MID + 60 }, dir = Math.random() < 0.5 ? -1 : 1, gold = it.kind === 'bellgold';
@@ -340,18 +344,18 @@
   }
   function resetRun() {
     state = 'hatch'; depth = 0; bag = 0; bagCount = 0; deepest = 0; seg = { kind: 'move', t: 0, from: 0 };
-    chipped = new Map(); floats = []; animT = 0; items = []; speed = 0; dropAcc = 0; bagShown = 0; minus = []; oreFlash = {};
+    chipped = new Map(); floats = []; animT = 0; items = []; speed = 0; dropAcc = 0; bagShown = 0; stonesShown = 0; minus = []; oreFlash = {};
   }
 
   function bank() {
-    const got = bag, lvl = deepest, got_ores = items.slice();
+    const got = Math.round(bag), lvl = deepest, got_ores = items.slice();
     resetRun();
     rec.runs++; rec.banked += got; rec.best = Math.max(rec.best, lvl);
     got_ores.forEach((it) => { rec.ores[it.kind] = (rec.ores[it.kind] || 0) + 1; });
     const t = today();
     if (rec.lastDay !== t) { rec.streak = rec.lastDay === yesterday() ? rec.streak + 1 : 1; rec.lastDay = t; }
     saveRec();
-    say('You got out. +' + got.toLocaleString('en-US') + ' points.', 'From level ' + lvl + '. The bag is banked.');
+    say('You got out. +' + got_ores.length + ' stone' + (got_ores.length === 1 ? '' : 's') + '.', 'From level ' + lvl + '. Score +' + Math.round(got).toLocaleString('en-US') + '. The bag is banked.');
     // the ores go into the village's stores now (saved); they fly in when the village shows, 2 seconds from now
     const counts = {}; got_ores.forEach((it) => { counts[it.kind] = (counts[it.kind] || 0) + 1; });
     Village.banked(counts);
@@ -378,11 +382,11 @@
         say('A block came while the feed was down.', 'This run does not count. Nothing lost, nothing banked.');
         resetRun(); villageReturn = { at: performance.now() + 3000, counts: null };
       } else {
-        const lvl = levelNow(), secs = Math.ceil(climbSeconds(state === 'up' ? speed : 0) - 1e-6), lost = bag;
+        const lvl = levelNow(), secs = Math.ceil(climbSeconds(state === 'up' ? speed : 0) - 1e-6), lostStones = bagCount;
         ringBell();
         rec.caught++; saveRec();
         say('The bell rang. You were on level ' + lvl + ', ' + secs + ' second' + (secs === 1 ? '' : 's') + ' from the hatch.',
-          'The bag is lost (' + lost.toLocaleString('en-US') + ' points).', 12000);
+          'The bag is lost (' + lostStones + ' stone' + (lostStones === 1 ? '' : 's') + ').', 12000);
         // hold the moment: he stays where the bell caught him, then the new round starts at the hatch
         caught = { at: performance.now(), depth, sheet: lastSheet, frame: lastFrame, count: bagCount };
         state = 'caught'; bag = 0; bagCount = 0;
@@ -724,9 +728,13 @@
     text('BAG', rcx, 322, 48, 600, CREAM, 'center', 6);
     // the bag number counts up and down to the bag's value
     bagShown += (bag - bagShown) * Math.min(1, frameDt * 6); if (Math.abs(bag - bagShown) < 0.6) bagShown = bag;
-    const bagS = Math.max(0, Math.round(bagShown)).toLocaleString('en-US'), bagPx = fit(bagS, 112, 'num700', sideW);
+    stonesShown += (bagCount - stonesShown) * Math.min(1, frameDt * 8); if (Math.abs(bagCount - stonesShown) < 0.5) stonesShown = bagCount;
+    // the bag in stones (it counts up and down); the points move to a quiet "score" line under the ore counts
+    const bagS = Math.max(0, Math.round(stonesShown)).toLocaleString('en-US'), bagPx = fit(bagS, 112, 'num700', sideW);
     text(bagS, rcx, 450, bagPx, 'num700', CREAM, 'center');
-    text('points', rcx, 504, 40, 600, CREAM, 'center');
+    text('stones', rcx, 504, 40, 600, CREAM, 'center');
+    const scS = 'score ' + Math.max(0, Math.round(bagShown)).toLocaleString('en-US');
+    text(scS, rcx, 572 + 5 * 70 - 6, fit(scS, 34, 'num500', sideW + 10), 'num500', 'rgba(205,192,168,.7)', 'center');
     // what is in the bag, ore by ore: on the rock right of the shaft wall, never over the shaft
     const counts = Object.fromEntries(ORES.map((k) => [k, 0]));
     items.forEach((it) => { counts[it.kind]++; });
@@ -809,7 +817,8 @@
     if (!art) return;
     const cx = d.x, cy = levelY(d.n) + d.dy - camY;
     if (cy < -GAP || cy > FADE_BOT + GAP) return;
-    const h = GAP * 0.95 * d.scale, w = h * art.w / art.h;   // about one level tall
+    const big = d.stones >= 2 ? Math.min(1.3, 1.08 + 0.06 * (d.stones - 2)) : 1;   // 2 or more stones: a little larger and brighter
+    const h = GAP * 0.95 * d.scale * big, w = h * art.w / art.h;   // about one level tall
     const ch = chipped.get(d.n), sinceChip = ch ? (t - ch) / 1000 : -1;
     const dist = Math.hypot(cx - lampX, cy - lampY), prox = Math.pow(clamp01(1 - dist / LAMP_R), 1.2);
     ctx.save();
@@ -824,7 +833,7 @@
     } else if (art.glow && sinceChip < 0) {
       // in the lamp light it shines at full colour; outside it, only the darkness's dim view of it
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.45 * prox * (d.kind === 'bellgold' ? 1.3 : 1);
+      ctx.globalAlpha = Math.min(1, (0.45 * prox + (big > 1 ? 0.12 + 0.25 * prox : 0)) * (d.kind === 'bellgold' ? 1.3 : 1));
       ctx.drawImage(art.glow, -w / 2, -h / 2, w, h);
       if (art.rim) { ctx.globalAlpha = 0.25 + 0.6 * prox; ctx.drawImage(art.rim, -w / 2, -h / 2, w, h); }
     }
@@ -865,11 +874,14 @@
     floats = floats.filter((f) => t - f.at < 1200);
     for (const f of floats) {
       const a = clamp01((t - f.at) / 1200), e = 1 - Math.pow(1 - a, 2);
-      const side = f.x < LADDER_X ? -1 : 1, x = f.x + side * 70, y = f.wy - camY - 20 - e * GAP * 0.85;
+      // on the deposit's outer side, clear of the ladder and the level marks
+      const side = f.x < LADDER_X ? -1 : 1, x = f.x + side * 50, y = f.wy - camY - 50 - e * GAP * 0.85;
       const vis = (a < 0.3 ? 1 : 1 - (a - 0.3) / 0.7) * clamp01((y - 40 - clearTop) / 30);
       if (vis <= 0) continue;
       ctx.save(); shadow(16, f.gold ? 'rgba(255,200,80,.9)' : 'rgba(0,0,0,.9)'); ctx.globalAlpha = vis;
-      text('+' + f.v.toLocaleString('en-US'), x, y, f.gold ? 58 : 48, 'num700', f.gold ? '#ffe08a' : AMBER_HI, 'center');
+      const ps = '+' + f.v, px = 64, tw = measure(ps, px, 'num700');
+      text(ps, x - 30, y, px, 'num700', f.gold ? '#ffe08a' : AMBER_HI, 'center');
+      shadow(0); drawOreIcon(f.kind, x - 30 + tw / 2 + 36, y - px * 0.34, 62, vis);
       ctx.restore();
     }
   }
