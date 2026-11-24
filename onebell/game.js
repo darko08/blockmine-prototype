@@ -394,6 +394,7 @@
       }
     } else if (!b.initial) {
       if (!msg && mode === 'mine') say('Block ' + b.height.toLocaleString('en-US') + ' found.', 'A new mine. The bell rings only for miners below.', 4000);
+      Village.newBlock();   // the hatch bell swings a little
       // a finished bell tower rings once, quietly, at every new block
       if (Village.towerComplete()) { playQuiet(bell, 0.3); if (mode === 'village') Village.bellLine(); }
     }

@@ -7,9 +7,16 @@ window.makeVillage = function (G) {
   const { CREAM, DIM, AMBER, AMBER_HI } = G.colors;
 
   // ---- the painting and its plots (anchors: the centre of each plot's ground, in painting pixels) ----------------
-  const hill = G.load('assets/village/hill.png');
+  // daylight: hill-day.png and the buildings in assets/village/day (the dusk ones stay in the repo, unused)
+  const hill = G.load('assets/village/hill-day.png?v=1');
+  const FX = window.makeVillageFx(G);
+  // where the chimney top and the fire are inside the smelter and glassworks sprites (fractions of their size)
+  const MARKS = { smelter: { chimney: [0.652, 0.004], fire: [0.361, 0.544] }, glassworks: { chimney: [0.652, 0.004], fire: [0.62, 0.626] } };
+  const MOTION_KEY = 'onebell.reduceMotion';
+  let reduce = false; try { reduce = localStorage.getItem(MOTION_KEY) === '1'; } catch (e) {}
+  let motionRect = { x: 0, y: 0, w: 0, h: 0 }, lastT = 0;
   const BUILDINGS = ['smelter', 'lampworks', 'jeweller', 'glassworks', 'cottage', 'tower'];
-  const art = {}; BUILDINGS.forEach((k) => { art[k] = G.load('assets/village/' + k + '.png?v=1'); });
+  const art = {}; BUILDINGS.forEach((k) => { art[k] = G.load('assets/village/day/' + k + '.png?v=1'); });
   const P = (x, y, w) => ({ x: IMG_W * x / 100, y: IMG_H * y / 100, w });
   const PLOTS = {
     P1: P(69, 28, 330), P2: P(33, 38, 300), P3: P(65, 44, 300), P4: P(24, 56, 330), P5: P(77, 57, 320),
@@ -141,9 +148,9 @@ window.makeVillage = function (G) {
 
   // ---- buildings on their plots --------------------------------------------------------------------------------------
   function geom(id, type) {   // where a building stands: its picture scaled to the plot's width, its feet on the ground
-    const p = PLOTS[id], img = art[type], w = (type === 'tower' ? 0.82 : 0.96) * p.w;
+    const p = PLOTS[id], img = art[type], w = (type === 'tower' ? 0.86 : 1.06) * p.w;   // the grass patch covers the fence
     const h = G.ready(img) ? w * img.naturalHeight / img.naturalWidth : w * 0.85;
-    const bottom = p.y + p.w * 0.13;
+    const bottom = p.y + p.w * 0.16;
     return { x: p.x - w / 2, y: bottom - h, w, h, bottom };
   }
   function drawBuilding(id, b, t) {
@@ -154,7 +161,7 @@ window.makeVillage = function (G) {
     if (age < 0.55) { const a = age / 0.55; dy = -(1 - a * a) * 220; }                          // drops in
     else if (age < 0.85) { const a = (age - 0.55) / 0.3; sq = 1 - 0.07 * Math.sin(a * Math.PI); }   // and settles
     if (age >= 0.55 && !b.dusted) { b.dusted = true; puff(PLOTS[id].x, g.bottom - 10, g.w); }
-    ctx.save(); shadow(18, 'rgba(0,0,0,.6)');
+    ctx.save();
     ctx.translate(g.x + g.w / 2, g.bottom + dy); ctx.scale(1 / sq, sq);
     ctx.drawImage(img, -g.w / 2, -g.h, g.w, g.h);
     ctx.restore();
@@ -176,14 +183,15 @@ window.makeVillage = function (G) {
   function tag(x, y, s, t, opts) {   // a small label over a building
     opts = opts || {};
     const px = 34, w = measure(s, px, 'num600') + 34, h = 50;
-    const bounce = opts.bounce ? Math.abs(Math.sin(t / 260)) * 10 : 0, yy = y - bounce;
+    const bounce = opts.bounce && !reduce ? Math.abs(Math.sin(t / 260)) * 10 : 0, yy = y - bounce;
     ctx.save();
     if (opts.glow) { shadow(26, 'rgba(255,190,80,.9)'); }
     else shadow(10, 'rgba(0,0,0,.7)');
     roundRect(x - w / 2, yy - h / 2, w, h, 12);
     const g = ctx.createLinearGradient(0, yy - h / 2, 0, yy + h / 2);
-    if (opts.glow) { g.addColorStop(0, '#ffe39a'); g.addColorStop(1, '#e8a032'); } else { g.addColorStop(0, '#f2e2bc'); g.addColorStop(1, '#cdb58a'); }
-    ctx.fillStyle = g; ctx.fill(); shadow(0); ctx.lineWidth = 2.5; ctx.strokeStyle = '#5a3c14'; ctx.stroke();
+    // a solid parchment backing with a dark outline, so it reads over flowers and stone
+    if (opts.glow) { g.addColorStop(0, '#ffe39a'); g.addColorStop(1, '#e8a032'); } else { g.addColorStop(0, '#f6e8c6'); g.addColorStop(1, '#dcc496'); }
+    ctx.fillStyle = g; ctx.fill(); shadow(0); ctx.lineWidth = 4; ctx.strokeStyle = '#2a1806'; ctx.stroke();
     text(s, x, yy + 12, px, 'num600', '#2a1808', 'center');
     ctx.restore();
     return { x: x - w / 2, y: yy - h / 2, w, h };
@@ -196,6 +204,8 @@ window.makeVillage = function (G) {
     rects = [];
     ctx.fillStyle = '#0a0806'; ctx.fillRect(0, 0, IMG_W, IMG_H);
     if (G.ready(hill)) ctx.drawImage(hill, 0, 0, IMG_W, IMG_H);
+    G.dt = lastT ? Math.min(0.1, (t - lastT) / 1000) : 0; lastT = t;
+    FX.under(t, hill, reduce);
 
     // the hatch: tapping it goes down too
     rects.push({ x: HATCH.x - 130, y: HATCH.y - 150, w: 260, h: 230, fn: goDown });
@@ -213,25 +223,27 @@ window.makeVillage = function (G) {
         continue;
       }
       if (!b) {   // an empty plot: a quiet "+" to build on it
-        const pulse = 0.78 + 0.22 * Math.sin(t / 700);   // all together, gently, never below half
-        ctx.save(); ctx.globalAlpha = pulse; shadow(12, 'rgba(0,0,0,.8)');
-        ctx.beginPath(); ctx.arc(p.x, p.y, 26, 0, Math.PI * 2); ctx.fillStyle = 'rgba(30,20,10,.55)'; ctx.fill();
-        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,214,150,.9)'; ctx.stroke();
+        const pulse = reduce ? 1 : 0.78 + 0.22 * Math.sin(t / 700);   // all together, gently, never below half
+        ctx.save(); shadow(10, 'rgba(0,0,0,.6)');
+        ctx.beginPath(); ctx.arc(p.x, p.y, 34, 0, Math.PI * 2); ctx.fillStyle = 'rgba(20,12,4,.78)'; ctx.fill();   // a dark circle behind
+        shadow(0); ctx.globalAlpha = pulse;
+        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,220,160,.95)'; ctx.beginPath(); ctx.arc(p.x, p.y, 26, 0, Math.PI * 2); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(p.x - 12, p.y); ctx.lineTo(p.x + 12, p.y); ctx.moveTo(p.x, p.y - 12); ctx.lineTo(p.x, p.y + 12); ctx.stroke();
         ctx.restore();
         rects.push({ x: p.x - p.w / 2, y: p.y - p.w * 0.28, w: p.w, h: p.w * 0.5, fn: () => { panel = { kind: 'build', plot: id }; } });
         continue;
       }
       const g = drawBuilding(id, b, t);
+      if (WORKSHOPS[b.type]) { tick(b, Date.now()); FX.workshop(id, g, MARKS[b.type], b.queue > 0, t, reduce); }
       rects.push({ x: g.x, y: g.y, w: g.w, h: g.h, fn: () => tapBuilding(id) });
       if (WORKSHOPS[b.type]) {
         const W = WORKSHOPS[b.type];
         if (b.ready > 0) {
-          const r = tag(p.x, g.y - 30, 'Ready' + (b.ready > 1 ? ' ×' + b.ready : ''), t, { bounce: true, glow: true });
+          const r = tag(tagX(b.type, g), g.y - 30, 'Ready' + (b.ready > 1 ? ' ×' + b.ready : ''), t, { bounce: true, glow: true });
           rects.push({ x: r.x - 10, y: r.y - 10, w: r.w + 20, h: r.h + 20, fn: () => collect(id) });
         } else if (b.queue > 0) {
           const left = b.start + W.secs * 1000 - Date.now();
-          tag(p.x, g.y - 30, fmtClock(Math.max(0, left) + 999) + (b.queue > 1 ? '  +' + (b.queue - 1) : ''), t);
+          tag(tagX(b.type, g), g.y - 30, fmtClock(Math.max(0, left) + 999) + (b.queue > 1 ? '  +' + (b.queue - 1) : ''), t);
         }
       }
     }
@@ -239,7 +251,7 @@ window.makeVillage = function (G) {
 
     // ---- top: the counters, and the small line under them
     const tg = ctx.createLinearGradient(0, 0, 0, 270);
-    tg.addColorStop(0, 'rgba(8,6,4,.88)'); tg.addColorStop(0.7, 'rgba(8,6,4,.55)'); tg.addColorStop(1, 'rgba(8,6,4,0)');
+    tg.addColorStop(0, 'rgba(8,6,4,.9)'); tg.addColorStop(0.68, 'rgba(8,6,4,.84)'); tg.addColorStop(1, 'rgba(8,6,4,0)');
     ctx.fillStyle = tg; ctx.fillRect(L, 0, V.VW, 270);
     const top = 58 + V.safeTop, cells = [...ORES, 'coins'], cw = (V.VW - 40) / cells.length;
     cells.forEach((k, i) => {
@@ -269,8 +281,16 @@ window.makeVillage = function (G) {
     G.drawButton(bx, by, bw, bh, live ? 'GO DOWN' : blk.height === null ? 'CONNECTING' : 'PAUSED', live);
     if (live) rects.push({ x: bx - 10, y: by - 20, w: bw + 20, h: bh + 40, fn: goDown });
     const bl = blk.height === null ? 'Connecting to the Bitcoin chain…' : 'Block ' + blk.height.toLocaleString('en-US') + ' open ' + fmtClock(blk.now - blk.at);
+    // the block line on a dark strip
+    const sy = 1846 - V.safeBot, sg = ctx.createLinearGradient(0, sy - 10, 0, IMG_H);
+    sg.addColorStop(0, 'rgba(8,6,4,0)'); sg.addColorStop(0.18, 'rgba(8,6,4,.82)'); sg.addColorStop(1, 'rgba(8,6,4,.9)');
+    ctx.fillStyle = sg; ctx.fillRect(L, sy - 10, V.VW, IMG_H - sy + 10);
     shadow(8); text(bl, CX, 1888 - V.safeBot, 34, 'num500', DIM, 'center'); shadow(0);
     G.drawSoundIcons(R - 64, 1846 - V.safeBot, L + 22, 1846 - V.safeBot);
+    // reduce motion, beside the mute button
+    motionRect = { x: R - 158, y: 1832 - V.safeBot, w: 80, h: 80 };
+    drawMotionIcon(R - 144, 1846 - V.safeBot, 44);
+    rects.push({ ...motionRect, fn: toggleMotion });
 
     if (toast && t - toast.at < 6000) {
       const a = Math.min(1, (6000 - (t - toast.at)) / 600);
@@ -326,8 +346,9 @@ window.makeVillage = function (G) {
       }
     }
     ctx.restore();
-    if (v.orders.length > 1) {   // more orders: ‹ 1/3 ›
+    if (v.orders.length > 1) {   // more orders: ‹ 1/3 ›, on a dark pill so it reads over the sky
       const cxs = x0 + w * k / 2, yb = y0 + h * k;
+      ctx.save(); roundRect(cxs - 92, yb + 6, 184, 40, 20); ctx.fillStyle = 'rgba(12,8,4,.72)'; ctx.fill(); ctx.restore();
       shadow(8);
       text((orderIdx + 1) + ' / ' + v.orders.length, cxs, yb + 32, 26, 'num600', CREAM, 'center');
       text('‹', cxs - 56, yb + 34, 40, 700, CREAM, 'center'); text('›', cxs + 56, yb + 34, 40, 700, CREAM, 'center');
@@ -532,9 +553,27 @@ window.makeVillage = function (G) {
     if (!counts) return;
     for (const k in counts) if (counts[k] > 0) fly(k, { x: HATCH.x, y: HATCH.y - 40 }, Math.min(10, counts[k]), counts[k]);
   }
+  // a workshop's tag sits over its roof, clear of the chimney (and its smoke)
+  const tagX = (type, g) => (MARKS[type] ? g.x + g.w * 0.34 : g.x + g.w / 2);
+  function toggleMotion() { reduce = !reduce; try { localStorage.setItem(MOTION_KEY, reduce ? '1' : '0'); } catch (e) {} }
+  // a wave mark; crossed through when motion is reduced
+  function drawMotionIcon(x, y, s) {
+    const k = s / 52;
+    ctx.save(); ctx.globalAlpha = 0.85; ctx.strokeStyle = CREAM; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    for (let r = 0; r < 2; r++) {
+      ctx.beginPath();
+      for (let i = 0; i <= 20; i++) { const xx = x + 4 * k + i * 2.2 * k, yy = y + (16 + r * 16) * k + Math.sin(i / 20 * Math.PI * 2) * 6 * k; if (i) ctx.lineTo(xx, yy); else ctx.moveTo(xx, yy); }
+      ctx.stroke();
+    }
+    if (reduce) { ctx.beginPath(); ctx.moveTo(x + 2 * k, y + 2 * k); ctx.lineTo(x + 50 * k, y + 48 * k); ctx.stroke(); }
+    ctx.fillStyle = CREAM; ctx.font = '600 ' + Math.round(16 * k) + 'px ' + "'Cormorant Garamond', Georgia, serif"; ctx.textAlign = 'center';
+    ctx.fillText(reduce ? 'still' : 'motion', x + 26 * k, y + 72 * k);
+    ctx.restore();
+  }
+  function newBlock() { FX.newBlock(performance.now()); }
   function bellLine() { toast = { text: 'Your bell rings over the village.', at: performance.now() }; }
   const towerComplete = () => v.tower >= TOWER_STAGES;
   function key(k) { if (k === 'Escape') panel = null; else if ((k === ' ' || k === 'Enter') && !panel) goDown(); }
 
-  return { draw, tap, key, banked, arrive, bellLine, towerComplete };
+  return { draw, tap, key, banked, arrive, bellLine, towerComplete, newBlock };
 };
