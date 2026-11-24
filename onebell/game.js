@@ -49,6 +49,9 @@
   let rec = {};
   try { rec = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { rec = {}; }
   rec = Object.assign({ streak: 0, lastDay: null, best: 0, banked: 0, runs: 0, caught: 0 }, rec);
+  // the ores, in the order they are shown: one row each beside the bag, and their banked totals at the hatch
+  const ORES = ['copper', 'ember', 'moonstone', 'blackglass', 'bellgold'];
+  rec.ores = Object.assign(Object.fromEntries(ORES.map((k) => [k, 0])), rec.ores || {});
   const saveRec = () => { try { localStorage.setItem(KEY, JSON.stringify(rec)); } catch (e) {} };
   let muted = false;
   try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch (e) {}
@@ -124,7 +127,12 @@
     let x0 = w, y0 = h, x1 = 0, y1 = 0;
     const sd2 = new ImageData(w, h);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const p = y * w + x, i = p * 4, m = Math.max(0, Math.min(1, (mineralMap[p] - 0.4) / 0.3));
+      // black glass is as dark as its rock, so no colour separates them: its loose stone is its tall central shard,
+      // cut out by shape with a soft edge
+      let m;
+      if (kind === 'blackglass') { const ex = (x / w - 0.44) / 0.19, ey = (y / h - 0.26) / 0.26; m = Math.max(0, Math.min(1, (1 - Math.sqrt(ex * ex + ey * ey)) / 0.25)); }
+      else m = Math.max(0, Math.min(1, (mineralMap[y * w + x] - 0.4) / 0.3));
+      const p = y * w + x, i = p * 4;
       if (m <= 0 || !px[i + 3]) continue;
       sd2.data[i] = px[i]; sd2.data[i + 1] = px[i + 1]; sd2.data[i + 2] = px[i + 2]; sd2.data[i + 3] = px[i + 3] * m;
       if (m > 0.5) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
@@ -221,6 +229,7 @@
   let items = [];                       // the deposits in the bag: { kind, value }
   let speed = 0, dropAcc = 0;           // climbing: the chosen speed (index into SPEEDS), and levels climbed at FAST/RUN toward the next drop
   let bagShown = 0, minus = [], stones = [], sparks = [];   // the bag number as shown (it counts); "-N"; falling stones; bell-gold sparkles
+  let oreFlash = {};                    // ore -> { at, up }: its row flashes bright (chipped) or red (fell out)
   let sackAt = null;                    // where the sack on his back is on screen (for stones popping out of it)
   let chipped = new Map();              // level -> time it was chipped (this run)
   let floats = [], bits = [];           // "+N" on its way to the bag; crumbs of a chipped deposit
@@ -306,6 +315,7 @@
     const d = deposit(n);
     chipped.set(n, performance.now());
     bag += d.value; bagCount++; items.push({ kind: d.kind, value: d.value });
+    oreFlash[d.kind] = { at: performance.now(), up: true };
     play(pickRec);
     floats.push({ v: d.value, x: d.x, wy: levelY(n) + d.dy, at: performance.now(), gold: d.gold });
     for (let i = 0; i < 16; i++) bits.push({ x: d.x + (Math.random() - 0.5) * 50, wy: levelY(n) + d.dy + (Math.random() - 0.5) * 40,
@@ -319,6 +329,7 @@
     const it = items.splice(Math.floor(Math.random() * items.length), 1)[0];
     bag -= it.value; bagCount--;
     minus.push({ v: it.value, at: performance.now() });
+    oreFlash[it.kind] = { at: performance.now(), up: false };
     play(stoneRec);
     const from = sackAt || { x: LADDER_X, y: MID + 60 }, dir = Math.random() < 0.5 ? -1 : 1, gold = it.kind === 'bellgold';
     stones.push({ kind: it.kind, x: from.x + dir * 20, wy: from.y + camY, vx: dir * (150 + Math.random() * 120), vy: -300 - Math.random() * 100,
@@ -330,9 +341,10 @@
   }
 
   function bank() {
-    const got = bag, lvl = deepest;
+    const got = bag, lvl = deepest, got_ores = items.slice();
     resetRun();
     rec.runs++; rec.banked += got; rec.best = Math.max(rec.best, lvl);
+    got_ores.forEach((it) => { rec.ores[it.kind] = (rec.ores[it.kind] || 0) + 1; });
     const t = today();
     if (rec.lastDay !== t) { rec.streak = rec.lastDay === yesterday() ? rec.streak + 1 : 1; rec.lastDay = t; }
     saveRec();
@@ -689,9 +701,13 @@
     text('BAG', rcx, 322, 48, 600, CREAM, 'center', 6);
     // the bag number counts up and down to the bag's value
     bagShown += (bag - bagShown) * Math.min(1, frameDt * 6); if (Math.abs(bag - bagShown) < 0.6) bagShown = bag;
-    const bagS = Math.max(0, Math.round(bagShown)).toLocaleString('en-US'), bagPx = fit(bagS, 132, 'num700', sideW);
-    text(bagS, rcx, 462, bagPx, 'num700', CREAM, 'center');
-    text('points', rcx, 526, 44, 600, CREAM, 'center');
+    const bagS = Math.max(0, Math.round(bagShown)).toLocaleString('en-US'), bagPx = fit(bagS, 112, 'num700', sideW);
+    text(bagS, rcx, 450, bagPx, 'num700', CREAM, 'center');
+    text('points', rcx, 504, 40, 600, CREAM, 'center');
+    // what is in the bag, ore by ore: on the rock right of the shaft wall, never over the shaft
+    const counts = Object.fromEntries(ORES.map((k) => [k, 0]));
+    items.forEach((it) => { counts[it.kind]++; });
+    ORES.forEach((k, i) => drawOreRow(k, counts[k], rcx, 572 + i * 70, t));
     // a red "-N" beside it for a moment when a stone falls out
     minus = minus.filter((m) => t - m.at < 1600);
     minus.forEach((m, i) => {
@@ -706,7 +722,7 @@
     if (state === 'hatch' || state === 'caught') {
       const age = msg ? t - msg.at : 1e9;
       if (msg && age < msg.ttl) drawBand(msg.big, msg.small, Math.min(1, (msg.ttl - age) / 800));
-      else { msg = null; if (state === 'hatch' && blockHeight !== null) drawBand('Banked: ' + (rec.banked || 0).toLocaleString('en-US') + ' points', '', 1, true); }
+      else { msg = null; if (state === 'hatch' && blockHeight !== null) drawBanked(); }
     } else {
       const pct = Math.round(bellChance() * 100) + '%';
       ctx.save(); shadow(30, 'rgba(255,150,40,.45)');
@@ -885,6 +901,34 @@
     ctx.restore();
   }
 
+  // the small loose-stone picture of an ore, centred at x, y, fitting a size x size box
+  function drawOreIcon(k, x, y, size, alpha) {
+    const art = deps[k];
+    if (!art || !art.stone) return;
+    const st = art.stone, m = Math.max(st.width, st.height), w = size * st.width / m, h = size * st.height / m;
+    // a thin warm outline so every stone reads on the dark rock (black glass most of all)
+    ctx.save(); ctx.globalAlpha = alpha; ctx.shadowColor = k === 'blackglass' ? 'rgba(255,196,110,.95)' : 'rgba(255,190,110,.45)';
+    ctx.shadowBlur = k === 'blackglass' ? 7 : 5; ctx.shadowOffsetY = 0;
+    ctx.drawImage(st, x - w / 2, y - h / 2, w, h);
+    if (k === 'blackglass') ctx.drawImage(st, x - w / 2, y - h / 2, w, h);
+    ctx.restore();
+  }
+  // one row beside the bag: the ore's stone and how many are in the bag; dim at 0; a flash when it changes
+  function drawOreRow(k, n, cx, y, t) {
+    const f = oreFlash[k], a = f ? clamp01(1 - (t - f.at) / 700) : 0;
+    const iconX = cx - 38, numX = cx + 4;
+    if (a > 0) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      const c = f.up ? '255,214,120' : '255,70,50', g = ctx.createRadialGradient(cx, y, 0, cx, y, 70);
+      g.addColorStop(0, 'rgba(' + c + ',' + 0.55 * a + ')'); g.addColorStop(1, 'rgba(' + c + ',0)');
+      ctx.fillStyle = g; ctx.fillRect(cx - 70, y - 40, 140, 80); ctx.restore();
+    }
+    const on = n > 0;
+    drawOreIcon(k, iconX, y, 58 * (1 + 0.25 * a), on ? 1 : 0.32);
+    const col = a > 0 && f && !f.up ? '#ff6a55' : on ? CREAM : 'rgba(239,230,210,.32)';
+    text(String(n), numX, y + 17, 50 * (1 + 0.2 * a), 'num700', col, 'left');
+  }
+
   // the message band in the bottom panel, where the percentage is while he is below
   function drawBand(big, small, alpha, quiet) {
     const L = vx0, w = VW - 80, CX = IMG_W / 2;
@@ -894,6 +938,28 @@
     ctx.save(); ctx.globalAlpha = alpha;
     bigLines.forEach((l) => { ctx.save(); shadow(24, 'rgba(255,150,40,.35)'); text(l, CX, y, bigPx, 700, quiet ? AMBER : AMBER_HI, 'center'); ctx.restore(); y += bigPx + 8; });
     smallLines.forEach((l) => { text(l, CX, y + 4, 34, 600, DIM, 'center'); y += 42; });
+    ctx.restore();
+  }
+
+  // at the hatch: the banked points, and under them the banked total of each ore
+  function drawBanked() {
+    const CX = IMG_W / 2, y = 1548;
+    ctx.save(); shadow(24, 'rgba(255,150,40,.35)');
+    const s1 = 'Banked: ' + (rec.banked || 0).toLocaleString('en-US') + ' points';
+    text(s1, CX, y, fit(s1, 60, 700, VW - 80), 700, AMBER, 'center');
+    ctx.restore();
+    const cells = ORES.map((k) => ({ k, n: rec.ores[k] || 0, s: (rec.ores[k] || 0).toLocaleString('en-US') }));
+    const numPx = 46, iconW = 58, gapIn = 8, gapOut = 34;
+    const widths = cells.map((c) => iconW + gapIn + measure(c.s, numPx, 'num700'));
+    let total = widths.reduce((a, w) => a + w, 0) + gapOut * (cells.length - 1), k = Math.min(1, (VW - 60) / total);
+    let x = CX - total * k / 2;
+    ctx.save(); ctx.translate(x, 1634); ctx.scale(k, k);
+    let cx = 0;
+    cells.forEach((c, i) => {
+      drawOreIcon(c.k, cx + iconW / 2, 0, iconW, c.n ? 1 : 0.32);
+      text(c.s, cx + iconW + gapIn, 16, numPx, 'num700', c.n ? CREAM : 'rgba(239,230,210,.32)', 'left');
+      cx += widths[i] + gapOut;
+    });
     ctx.restore();
   }
 
